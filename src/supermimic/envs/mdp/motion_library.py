@@ -18,6 +18,11 @@ Goal features (per frame, 68-d for the G1, plan D5):
   [joint_pos - q0 (NJ), joint_vel (NJ), projected gravity of the ref root (3),
    ref root angular velocity in the root frame (3),
    ref root linear velocity in the ref heading frame (3), ref root height (1)]
+plus, with props (``ROBOT.props``), each prop's pose in the ref root frame [pos (3), rot6d (6)].
+
+With props the reference state continues with ``[pos 3, quat 4, lin vel w 3, ang vel w 3]`` per prop
+(npz keys ``prop_*_w``, scripts/data/add_props_to_clip.py), and ``hand_loaded`` (frames, H) flags the
+hand joints whose glove regions are loaded (all False for clips without the key).
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from supermimic.kinematics.rotations import projected_gravity, quat_apply_inverse, yaw_quat
+from supermimic.kinematics.rotations import projected_gravity, quat_apply_inverse, quat_inv, quat_mul, rot6d_from_quat, yaw_quat
 from supermimic.robots import ROBOT
 
 GOAL_FEAT_DIM = ROBOT.goal_frame_dim
@@ -54,6 +59,19 @@ class RefState:
     root_lin_vel_w: torch.Tensor  # (N,3)
     root_ang_vel_w: torch.Tensor  # (N,3)
     joint_vel: torch.Tensor  # (N,NJ)
+    prop_pos_w: torch.Tensor | None = None  # (N,P,3)
+    prop_quat_w: torch.Tensor | None = None  # (N,P,4)
+    prop_lin_vel_w: torch.Tensor | None = None  # (N,P,3)
+    prop_ang_vel_w: torch.Tensor | None = None  # (N,P,3)
+
+
+def prop_pose_in_root(root_pos: torch.Tensor, root_quat: torch.Tensor, prop_pos: torch.Tensor, prop_quat: torch.Tensor) -> torch.Tensor:
+    """(…, P*9): each prop's [position (3), rot6d (6)] in the root frame. root (…,3/4), props (…,P,3/4)."""
+    P = prop_pos.shape[-2]
+    rq = root_quat[..., None, :].expand(*prop_quat.shape)
+    pos = quat_apply_inverse(rq, prop_pos - root_pos[..., None, :])
+    rot = rot6d_from_quat(quat_mul(quat_inv(rq), prop_quat))
+    return torch.cat([pos, rot], dim=-1).reshape(*prop_pos.shape[:-2], P * 9)
 
 
 @dataclass
@@ -70,7 +88,10 @@ def goal_features(ref: RefState, default_joint_pos: torch.Tensor) -> torch.Tenso
     ang_b = quat_apply_inverse(q, ref.root_ang_vel_w)
     lin_h = quat_apply_inverse(yaw_quat(q), ref.root_lin_vel_w)
     height = ref.root_pos_w[..., 2:3]
-    return torch.cat([ref.joint_pos - default_joint_pos, ref.joint_vel, grav, ang_b, lin_h, height], dim=-1)
+    parts = [ref.joint_pos - default_joint_pos, ref.joint_vel, grav, ang_b, lin_h, height]
+    if ref.prop_pos_w is not None:
+        parts.append(prop_pose_in_root(ref.root_pos_w, q, ref.prop_pos_w, ref.prop_quat_w))
+    return torch.cat(parts, dim=-1)
 
 
 class MotionLibrary:
@@ -102,10 +123,13 @@ class MotionLibrary:
         start = 0
         body_idx = root_idx = None
         ref_chunks: list[np.ndarray] = []
+        loaded_chunks: list[np.ndarray] = []
+        nh = len(ROBOT.hand_joint_names)
         body_chunks = {"pos": [], "quat": [], "lin": [], "ang": []}
         # A single packed cache (build_library.py) can stand in for the npz list (compact mode only).
         if len(npz_files) == 1 and str(npz_files[0]).endswith(".pt"):
             assert compact, "packed .pt libraries are compact-only"
+            assert not ROBOT.props, "packed .pt libraries hold no prop reference"
             pack = torch.load(npz_files[0], map_location="cpu", weights_only=False)
             self._ref = pack["ref"].to(device=self.device, dtype=store_dtype)
             clips = [ClipInfo(n, int(st), int(ln)) for n, st, ln in zip(pack["names"], pack["starts"], pack["lengths"])]
@@ -119,10 +143,19 @@ class MotionLibrary:
                     root_idx = names.index("pelvis")
                 n = int(d["joint_pos"].shape[0])
                 bp, bq, blv, bav = d["body_pos_w"], d["body_quat_w"], d["body_lin_vel_w"], d["body_ang_vel_w"]
-                ref = np.concatenate(
-                    [bp[:, root_idx], bq[:, root_idx], d["joint_pos"], blv[:, root_idx], bav[:, root_idx], d["joint_vel"]], axis=1
-                ).astype(np.float32)
-                ref_chunks.append(ref)
+                parts = [bp[:, root_idx], bq[:, root_idx], d["joint_pos"], blv[:, root_idx], bav[:, root_idx], d["joint_vel"]]
+                if ROBOT.props:
+                    if "prop_pos_w" not in d:
+                        raise ValueError(f"{f} has no prop reference (scripts/data/add_props_to_clip.py)")
+                    pidx = [[str(p) for p in d["prop_names"]].index(p) for p in ROBOT.props]
+                    blocks = np.concatenate([d[k][:, pidx] for k in ("prop_pos_w", "prop_quat_w", "prop_lin_vel_w", "prop_ang_vel_w")], axis=-1)
+                    parts.append(blocks.reshape(n, -1))
+                ref_chunks.append(np.concatenate(parts, axis=1).astype(np.float32))
+                if nh and "hand_loaded" in d:
+                    assert tuple(str(j) for j in d["hand_loaded_joints"]) == ROBOT.hand_joint_names
+                    loaded_chunks.append(d["hand_loaded"].astype(np.float32))
+                else:
+                    loaded_chunks.append(np.zeros((n, nh), np.float32))
                 if not compact:
                     body_chunks["pos"].append(bp[:, body_idx])
                     body_chunks["quat"].append(bq[:, body_idx])
@@ -139,6 +172,9 @@ class MotionLibrary:
             assert ref_np.shape[1] == REF_DIM
             self._ref = torch.as_tensor(ref_np, device=self.device, dtype=store_dtype if compact else dtype)
             del ref_np, ref_chunks
+            self.hand_loaded = torch.as_tensor(np.concatenate(loaded_chunks, 0), device=self.device, dtype=dtype)
+        else:
+            self.hand_loaded = torch.zeros(self.num_frames, nh, device=self.device, dtype=dtype)
         if not compact:
             t = lambda arrs: torch.as_tensor(np.concatenate(arrs, 0), dtype=dtype, device=self.device)  # noqa: E731
             self.body_pos_w = t(body_chunks["pos"])
@@ -172,7 +208,9 @@ class MotionLibrary:
 
     @staticmethod
     def _split(r: torch.Tensor) -> RefState:
-        return RefState(*ROBOT.split_state(r))
+        if not ROBOT.props:
+            return RefState(*ROBOT.split_state(r))
+        return RefState(*ROBOT.split_state(r), *ROBOT.split_props(r))
 
     def ref(self, frame: torch.Tensor) -> RefState:
         return self._split(self._ref[frame].to(self.dtype))

@@ -4,10 +4,15 @@
 * ``g1_inspire``: the same G1 with Inspire RH56 DFQ five-finger hands in place of the rubber hands. Each hand
   has 12 hinge joints, 6 of them actuated (thumb yaw, thumb pitch, the proximal joint of each finger); the other
   6 follow through the URDF ``<mimic>`` couplings, kept as MuJoCo joint equalities. 53 hinges, 41 actuators.
+* ``g1_inspire_sweep``: ``g1_inspire`` with two free props (broom, dustpan) and a table in the scene, for the
+  sweep clip with physical grasps; the hand collision geoms get sliding and torsional friction (condim 4).
 
-The state, observation and goal layouts are sized by the number of hinge joints (``nj``), the action by the
-number of actuated joints (``na``). The active robot is fixed per process by the ``SM_ROBOT`` environment
-variable, since those sizes are module-level constants throughout the package.
+The state, observation and goal layouts are sized by the number of hinge joints (``nj``) and of props, the
+action by the number of actuated joints (``na``). The active robot is fixed per process by the ``SM_ROBOT``
+environment variable, since those sizes are module-level constants throughout the package.
+
+The state is the robot block ``[qpos | qvel]`` followed by one 13-d block per prop
+``[pos 3, quat wxyz 4, lin vel world 3, ang vel body 3]`` (the prop's free-joint qpos and qvel).
 """
 
 from __future__ import annotations
@@ -135,6 +140,7 @@ class RobotSpec:
     spec_fn: Callable[[], mujoco.MjSpec]
     nconmax: int
     njmax: int
+    props: tuple[str, ...] = ()  # free rigid props simulated with the robot (supermimic.envs.props)
 
     @property
     def nj(self) -> int:
@@ -153,13 +159,27 @@ class RobotSpec:
         return 6 + self.nj
 
     @property
-    def state_dim(self) -> int:
+    def num_props(self) -> int:
+        return len(self.props)
+
+    @property
+    def robot_state_dim(self) -> int:
         """[root pos 3, root quat 4, joint pos nj, root lin vel 3, root ang vel 3, joint vel nj]."""
         return self.nq + self.nv
 
     @property
+    def state_dim(self) -> int:
+        """Robot block, then [pos 3, quat 4, lin vel 3, ang vel 3] per prop."""
+        return self.robot_state_dim + 13 * self.num_props
+
+    @property
+    def feat_dim(self) -> int:
+        """World-model input features: robot block, then [pos 3, rot6d 6, lin vel 3, ang vel 3] per prop."""
+        return self.robot_state_dim + 15 * self.num_props
+
+    @property
     def delta_dim(self) -> int:
-        return 12 + 2 * self.nj
+        return 12 + 2 * self.nj + 12 * self.num_props
 
     @property
     def xi_dim(self) -> int:
@@ -168,13 +188,13 @@ class RobotSpec:
 
     @property
     def obs_frame_dim(self) -> int:
-        """joint pos nj, joint vel nj, base ang vel 3, projected gravity 3, last action na."""
-        return 2 * self.nj + 6 + self.na
+        """joint pos nj, joint vel nj, base ang vel 3, projected gravity 3, last action na, prop pose in the root frame 9 per prop."""
+        return 2 * self.nj + 6 + self.na + 9 * self.num_props
 
     @property
     def goal_frame_dim(self) -> int:
-        """joint pos - q0 nj, joint vel nj, gravity 3, ang vel 3, lin vel 3, height 1."""
-        return 2 * self.nj + 10
+        """joint pos - q0 nj, joint vel nj, gravity 3, ang vel 3, lin vel 3, height 1, prop pose in the root frame 9 per prop."""
+        return 2 * self.nj + 10 + 9 * self.num_props
 
     def joint_indices(self, names: tuple[str, ...]) -> list[int]:
         return [self.joint_names.index(n) for n in names]
@@ -183,6 +203,11 @@ class RobotSpec:
         """-> root_pos 3, root_quat 4, joint_pos nj, root_lin_vel_w 3, root_ang_vel 3, joint_vel nj (last axis)."""
         n = self.nj
         return s[..., 0:3], s[..., 3:7], s[..., 7 : 7 + n], s[..., 7 + n : 10 + n], s[..., 10 + n : 13 + n], s[..., 13 + n : 13 + 2 * n]
+
+    def split_props(self, s):
+        """-> pos (…,P,3), quat (…,P,4), lin_vel_w (…,P,3), ang_vel (…,P,3) of the prop blocks (torch)."""
+        b = s[..., self.robot_state_dim :].reshape(*s.shape[:-1], self.num_props, 13)
+        return b[..., 0:3], b[..., 3:7], b[..., 7:10], b[..., 10:13]
 
     def mj_model(self) -> mujoco.MjModel:
         """Standalone CPU model (no mjlab actuators); checks the joint order."""
@@ -280,6 +305,30 @@ def _inspire_action_scale() -> dict[str, float]:
     return {**_g1_action_scale(), **{j: INSPIRE_HAND_ACTION_SCALE for j in INSPIRE_HAND_ACTUATED}}
 
 
+# Hands that grasp: sliding friction 1 and torsional friction 5 mm (about a fingertip contact patch). mjlab's
+# G1 collision config makes every non-foot geom frictionless (condim 1).
+INSPIRE_HAND_GEOMS = r"^[LR]_.*_collision$"
+INSPIRE_HAND_FRICTION = (1.0, 0.005, 0.0001)
+
+
+def _inspire_sweep_entity_cfg() -> EntityCfg:
+    from mjlab.utils.spec_config import CollisionCfg
+
+    feet = _G1_FEET
+    cfg = _inspire_entity_cfg()
+    cfg.collisions = (
+        CollisionCfg(
+            geom_names_expr=(".*_collision",),
+            contype=1,
+            conaffinity=1,
+            condim={feet: 3, INSPIRE_HAND_GEOMS: 4, ".*_collision": 1},
+            priority={feet: 1, ".*": 0},
+            friction={feet: (0.6,), INSPIRE_HAND_GEOMS: INSPIRE_HAND_FRICTION},
+        ),
+    )
+    return cfg
+
+
 # ----------------------------------------------------------------------------- registry
 
 _G1_FEET = r"^(left|right)_foot[1-7]_collision$"
@@ -318,6 +367,24 @@ ROBOTS: dict[str, RobotSpec] = {
         spec_fn=_inspire_spec,
         nconmax=60,
         njmax=400,
+    ),
+    "g1_inspire_sweep": RobotSpec(
+        name="g1_inspire_sweep",
+        joint_names=INSPIRE_JOINT_NAMES,
+        actuated_joint_names=tuple(j for j in INSPIRE_JOINT_NAMES if j not in INSPIRE_MIMIC),
+        tracked_bodies=G1_TRACKED_BODIES,
+        anchor_body="torso_link",
+        root_body="pelvis",
+        foot_geom_regex=_G1_FEET,
+        limit_joint_names=G1_JOINT_NAMES,
+        hand_joint_names=INSPIRE_HAND_ACTUATED,
+        mimic=tuple((f, d, m) for f, (d, m) in INSPIRE_MIMIC.items()),
+        entity_cfg_fn=_inspire_sweep_entity_cfg,
+        action_scale_fn=_inspire_action_scale,
+        spec_fn=_inspire_spec,
+        nconmax=200,
+        njmax=1200,
+        props=("broom", "dustpan"),
     ),
 }
 

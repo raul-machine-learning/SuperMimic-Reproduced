@@ -63,6 +63,8 @@ class MultiClipMotionCommand(CommandTerm):
         )
         print(f"[INFO] {self.library.summary()}")
         lib = self.library
+        self.props: list[Entity] = [env.scene[p] for p in ROBOT.props]
+        self.table: Entity | None = env.scene["table"] if ROBOT.props else None
 
         n = self.num_envs
         self.frame = torch.zeros(n, dtype=torch.long, device=self.device)
@@ -143,6 +145,20 @@ class MultiClipMotionCommand(CommandTerm):
     def root_quat_w(self) -> torch.Tensor:
         return self._ref.root_quat_w
 
+    @property
+    def prop_pos_w(self) -> torch.Tensor:
+        """(N,P,3) reference prop positions."""
+        return self._ref.prop_pos_w + self._env.scene.env_origins[:, None, :]
+
+    @property
+    def prop_quat_w(self) -> torch.Tensor:
+        return self._ref.prop_quat_w
+
+    @property
+    def hand_loaded(self) -> torch.Tensor:
+        """(N,H) 1 where the reference's glove loads that hand joint's finger."""
+        return self.library.hand_loaded[self.frame]
+
     # ------------------------------------------------------------------ robot
 
     @property
@@ -184,6 +200,15 @@ class MultiClipMotionCommand(CommandTerm):
     @property
     def robot_root_quat_w(self) -> torch.Tensor:
         return self.robot.data.body_link_quat_w[:, self.robot_root_body_index]
+
+    @property
+    def sim_prop_pos_w(self) -> torch.Tensor:
+        """(N,P,3) simulated prop positions."""
+        return torch.stack([p.data.root_link_pos_w for p in self.props], dim=1)
+
+    @property
+    def sim_prop_quat_w(self) -> torch.Tensor:
+        return torch.stack([p.data.root_link_quat_w for p in self.props], dim=1)
 
     # ------------------------------------------------------------------ metrics
 
@@ -291,6 +316,22 @@ class MultiClipMotionCommand(CommandTerm):
         self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
         self.robot.reset(env_ids=env_ids)
 
+    def _write_props_to_sim(self, env_ids: torch.Tensor, frame: torch.Tensor) -> None:
+        """Props at their reference state of ``frame`` (no noise), the table at its place."""
+        if not self.props:
+            return
+        r = self.library.ref(frame)
+        origins = self._env.scene.env_origins[env_ids]
+        for k, p in enumerate(self.props):
+            state = torch.cat([r.prop_pos_w[:, k] + origins, r.prop_quat_w[:, k], r.prop_lin_vel_w[:, k], r.prop_ang_vel_w[:, k]], dim=-1)
+            p.write_root_state_to_sim(state, env_ids=env_ids)
+            p.reset(env_ids=env_ids)
+        assert self.table is not None
+        init = self.table.cfg.init_state
+        pose = torch.tensor([*init.pos, *init.rot], device=self.device).repeat(len(env_ids), 1)
+        pose[:, :3] += origins
+        self.table.write_mocap_pose_to_sim(pose, env_ids=env_ids)
+
     def _resample_command(self, env_ids: torch.Tensor):
         # Episode bookkeeping for the envs being reset (terminal reward is already in reward_buf).
         mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -327,6 +368,7 @@ class MultiClipMotionCommand(CommandTerm):
             joint_pos = joint_pos + sample_uniform(lo, hi, joint_pos.shape, device=self.device)
 
         self._write_reference_state_to_sim(env_ids, root_pos, root_ori, root_lin_vel, root_ang_vel, joint_pos, joint_vel)
+        self._write_props_to_sim(env_ids, self.frame[env_ids])
 
     def update_relative_body_poses(self) -> None:
         nb = len(self.cfg.body_names)
@@ -368,6 +410,7 @@ class MultiClipMotionCommand(CommandTerm):
         self._write_reference_state_to_sim(
             env_ids, r.root_pos_w + self._env.scene.env_origins[env_ids], r.root_quat_w, r.root_lin_vel_w, r.root_ang_vel_w, r.joint_pos, r.joint_vel
         )
+        self._write_props_to_sim(env_ids, frame)
 
     # ------------------------------------------------------------------ debug visualization (viewer only)
 
