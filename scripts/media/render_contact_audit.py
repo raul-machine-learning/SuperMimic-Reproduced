@@ -22,9 +22,9 @@ from PIL import Image, ImageDraw, ImageFont
 from scipy.spatial.transform import Rotation
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from render_rollout import robot_mjcf  # noqa: E402
+from render_rollout import robot_mjcf
 
-from supermimic.robots import ROBOT  # noqa: E402
+from supermimic.robots import ROBOT
 
 ROOT = Path(__file__).resolve().parents[2]
 PROP_MESHES = {"cleaningtools_broom": "cleaningtools_broom.stl", "cleaningtools_dustpan": "cleaningtools_dustpan.stl",
@@ -127,7 +127,7 @@ def main(retarget: Path, audit: Path, out: Path, mocap_dir: Path = ROOT / "data/
     times = z["times"]
     yaw = Rotation.from_quat(z["qpos"][:, 3:7], scalar_first=True).as_euler("zyx")[:, 0]
     facing = np.degrees(np.arctan2(np.sin(yaw).mean(), np.cos(yaw).mean()))
-    stride = max(1, int(round((len(times) - 1) / (times[-1] - times[0]) / fps)))
+    stride = max(1, round((len(times) - 1) / (times[-1] - times[0]) / fps))
     out.parent.mkdir(parents=True, exist_ok=True)
     ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
                            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)

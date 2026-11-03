@@ -22,6 +22,7 @@ from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
 ROOT = Path(__file__).resolve().parents[2]
+RETARGET_ROOT = Path.home() / "g1-sweep-retarget"
 
 
 def _load_regions(retarget_root: Path):
@@ -56,7 +57,7 @@ def geom_surface_points(model: mujoco.MjModel, g: int, n: int = 12) -> np.ndarra
     raise ValueError(f"geom type {t} not supported")
 
 
-def main(retarget: Path, mocap_dir: Path = ROOT / "data/sweep_mocap", retarget_root: Path = Path.home() / "g1-sweep-retarget",
+def main(retarget: Path, mocap_dir: Path = ROOT / "data/sweep_mocap", retarget_root: Path = RETARGET_ROOT,
          rest: tuple[float, float] = (0.0, 2.0), loaded_frac: float = 0.15, prop_shift_z: float = 0.0, out: Path | None = None) -> None:
     """``out``: also save the per-frame gaps and glove-load flags (npz, for scripts/media/render_contact_audit.py)."""
     from supermimic.robots import ROBOT
