@@ -150,9 +150,9 @@ class AnalyticHeads:
         * ``wrists``: [largest wrist position error (m), largest wrist orientation error (rad)]; needs ``ref.joint_pos``.
         """
         if ROBOT.termination == "wrists":
-            from supermimic.kinematics.wrists import wrist_errors, wrist_joint_index
+            from supermimic.kinematics.wrists import wrist_errors
 
-            pos, ang = wrist_errors(split_state(s)[2], ref.joint_pos, wrist_joint_index(s.device))
+            pos, ang = wrist_errors(split_state(s)[2], ref.joint_pos)
             return torch.stack([pos.amax(-1), ang.amax(-1)], dim=-1)
         root_pos, root_quat = s[..., 0:3], s[..., 3:7]
         g = torch.tensor([0.0, 0.0, -1.0], dtype=root_quat.dtype, device=root_quat.device).expand(root_quat.shape[:-1] + (3,))
@@ -171,9 +171,9 @@ class AnalyticHeads:
         from supermimic.kinematics.rotations import heading_yaw, quat_apply_inverse, wrap_to_pi, yaw_quat
 
         if ROBOT.termination == "wrists":
-            from supermimic.kinematics.wrists import wrist_errors, wrist_joint_index
+            from supermimic.kinematics.wrists import wrist_errors
 
-            pos, ang = wrist_errors(split_state(s)[2], ref.joint_pos, wrist_joint_index(s.device))
+            pos, ang = wrist_errors(split_state(s)[2], ref.joint_pos)
             return torch.stack([pos, ang], dim=-1).flatten(-2)
         dp = quat_apply_inverse(yaw_quat(ref.root_quat_w), s[..., 0:3] - ref.root_pos_w)
         dyaw = wrap_to_pi(heading_yaw(s[..., 3:7]) - heading_yaw(ref.root_quat_w))

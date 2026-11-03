@@ -7,18 +7,13 @@ the angle of ``R_ref^-1 R`` with ``R = Ry Rx Rz``: the base pose cancels and no 
 
 from __future__ import annotations
 
-from functools import cache
-
 import torch
 
 from supermimic.kinematics.rotations import quat_from_angle_axis, quat_inv, quat_mul
 from supermimic.robots import ROBOT
 
 
-@cache
-def wrist_joint_index(device) -> torch.Tensor:
-    """(H, 6) joint indices of each hand's wrist joints."""
-    return torch.tensor([ROBOT.joint_indices(w) for w in ROBOT.wrist_joints], dtype=torch.long, device=device)
+WRIST_INDEX: list[list[int]] = [ROBOT.joint_indices(w) for w in ROBOT.wrist_joints]  # (H, 6) joint indices
 
 
 def _wrist_quat(a: torch.Tensor) -> torch.Tensor:
@@ -28,9 +23,9 @@ def _wrist_quat(a: torch.Tensor) -> torch.Tensor:
     return quat_mul(quat_mul(q[0], q[1]), q[2])
 
 
-def wrist_errors(q: torch.Tensor, q_ref: torch.Tensor, index: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def wrist_errors(q: torch.Tensor, q_ref: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Joint positions (…, NJ) -> wrist position error (…, H) in m and orientation error (…, H) in rad."""
-    w, w_ref = q[..., index], q_ref[..., index]  # (…, H, 6)
+    w, w_ref = q[..., WRIST_INDEX], q_ref[..., WRIST_INDEX]  # (…, H, 6)
     d = w[..., :3] - w_ref[..., :3]
     pos = torch.sqrt((d * d).sum(-1) + 1e-12)
     rel = quat_mul(quat_inv(_wrist_quat(w_ref[..., 3:])), _wrist_quat(w[..., 3:]))

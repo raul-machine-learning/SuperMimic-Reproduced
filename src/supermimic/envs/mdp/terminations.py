@@ -29,19 +29,19 @@ def bad_root_tilt(env: ManagerBasedRlEnv, command_name: str, threshold: float = 
 
 def bad_wrist_pos(env: ManagerBasedRlEnv, command_name: str, threshold: float = 0.1) -> torch.Tensor:
     """Some wrist farther than ``threshold`` (m) from its reference (capsule-hand rig)."""
-    from supermimic.kinematics.wrists import wrist_errors, wrist_joint_index
+    from supermimic.kinematics.wrists import wrist_errors
 
     cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
-    pos, _ = wrist_errors(cmd.robot_joint_pos, cmd.joint_pos, wrist_joint_index(cmd.device))
+    pos, _ = wrist_errors(cmd.robot_joint_pos, cmd.joint_pos)
     return pos.amax(-1) > threshold
 
 
 def bad_wrist_ori(env: ManagerBasedRlEnv, command_name: str, threshold: float = 0.8) -> torch.Tensor:
     """Some wrist turned more than ``threshold`` (rad) away from its reference (capsule-hand rig)."""
-    from supermimic.kinematics.wrists import wrist_errors, wrist_joint_index
+    from supermimic.kinematics.wrists import wrist_errors
 
     cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
-    _, ang = wrist_errors(cmd.robot_joint_pos, cmd.joint_pos, wrist_joint_index(cmd.device))
+    _, ang = wrist_errors(cmd.robot_joint_pos, cmd.joint_pos)
     return ang.amax(-1) > threshold
 
 
