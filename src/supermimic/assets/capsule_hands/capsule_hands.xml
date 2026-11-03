@@ -20,7 +20,7 @@
             <joint name="L_index2_flex" range="-0.324533 1.9" armature="0.002" axis="0 0 -1"/>
             <geom name="L_index2_collision" size="0.0082 0.0168674" pos="0.0168674 0 0" quat="0.707107 0 -0.707107 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
             <body name="L_index3" pos="0.0337349 0 0">
-              <joint name="L_index3_flex" range="-0.347997 1.3" armature="0.002" axis="0 0 1"/>
+              <joint name="L_index3_flex" range="-0.324533 1.3" armature="0.002" axis="0 0 -1"/>
               <geom name="L_index3_collision" size="0.0074 0.0063" pos="0.0063 0 0" quat="0.707107 0 -0.707107 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
               <site name="L_index_tip" size="0.004" pos="0.02 0 0"/>
             </body>
@@ -54,7 +54,7 @@
             <joint name="L_ring2_flex" range="-0.324533 1.9" armature="0.002" axis="0 0 -1"/>
             <geom name="L_ring2_collision" size="0.008 0.015454" pos="0.015454 0 0" quat="0.707107 0 -0.707107 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
             <body name="L_ring3" pos="0.030908 0 0">
-              <joint name="L_ring3_flex" range="-0.164406 1.3" armature="0.002" axis="0 0 1"/>
+              <joint name="L_ring3_flex" range="-0.324533 1.3" armature="0.002" axis="0 0 -1"/>
               <geom name="L_ring3_collision" size="0.0072 0.0064" pos="0.0064 0 0" quat="0.707107 0 -0.707107 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
               <site name="L_ring_tip" size="0.004" pos="0.02 0 0"/>
             </body>
@@ -68,10 +68,10 @@
           <joint name="L_pinky1_spread" range="-0.344015 0.584343" armature="0.002" axis="0.12727 0.877929 0.461567"/>
           <geom name="L_pinky1_collision" size="0.0078 0.0125" pos="0.0125 0 0" quat="0.707107 0 -0.707107 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
           <body name="L_pinky2" pos="0.025 0 0">
-            <joint name="L_pinky2_flex" range="-0.278554 1.9" armature="0.002"/>
+            <joint name="L_pinky2_flex" range="-0.324533 1.9" armature="0.002" axis="0 0 -1"/>
             <geom name="L_pinky2_collision" size="0.0071 0.0107758" pos="0.0107758 0 0" quat="0.707107 0 -0.707107 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
             <body name="L_pinky3" pos="0.0215516 0 0">
-              <joint name="L_pinky3_flex" range="-0.189847 1.3" armature="0.002"/>
+              <joint name="L_pinky3_flex" range="-0.324533 1.3" armature="0.002" axis="0 0 -1"/>
               <geom name="L_pinky3_collision" size="0.0065 0.00675" pos="0.00675 0 0" quat="0.707107 0 -0.707107 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
               <site name="L_pinky_tip" size="0.004" pos="0.02 0 0"/>
             </body>
@@ -79,7 +79,7 @@
         </body>
       </body>
       <body name="L_thumb1" pos="0.0508867 -0.0116489 0.0435563">
-        <joint name="L_thumb1_flex" range="-0.0271948 1.08068" armature="0.002" axis="-0.0705967 0.34279 -0.936756"/>
+        <joint name="L_thumb1_flex" range="-0.730678 0.377195" armature="0.002" axis="0.0705967 -0.34279 0.936756"/>
         <joint name="L_thumb1_spread" range="-0.455461 0.25684" armature="0.002" axis="-0.131504 0.927704 0.349389"/>
         <geom name="L_thumb1_collision" size="0.012 0.0175" pos="0.0175 0 0" quat="0.707107 0 -0.707107 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
         <body name="L_thumb2" pos="0.035 0 0">
@@ -109,7 +109,7 @@
           <joint name="R_index1_spread" range="-0.323293 0.273923" armature="0.002" axis="-0.103777 0.830891 0.546672"/>
           <geom name="R_index1_collision" size="0.009 0.0175" pos="-0.0175 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
           <body name="R_index2" pos="-0.035 0 0">
-            <joint name="R_index2_flex" range="-0.169112 1.9" armature="0.002" axis="0 0 -1"/>
+            <joint name="R_index2_flex" range="-0.324533 1.9" armature="0.002"/>
             <geom name="R_index2_collision" size="0.0082 0.0165766" pos="-0.0165766 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
             <body name="R_index3" pos="-0.0331533 0 0">
               <joint name="R_index3_flex" range="-0.0120376 1.57668" armature="0.002"/>
@@ -126,7 +126,7 @@
           <joint name="R_middle1_spread" range="-0.451835 0.274316" armature="0.002" axis="0.0214404 0.946775 0.321182"/>
           <geom name="R_middle1_collision" size="0.0093 0.0175" pos="-0.0175 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
           <body name="R_middle2" pos="-0.035 0 0">
-            <joint name="R_middle2_flex" range="-0.31245 1.9" armature="0.002" axis="0 0 -1"/>
+            <joint name="R_middle2_flex" range="-0.324533 1.9" armature="0.002"/>
             <geom name="R_middle2_collision" size="0.0085 0.0151447" pos="-0.0151447 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
             <body name="R_middle3" pos="-0.0302893 0 0">
               <joint name="R_middle3_flex" range="-0.084642 1.45382" armature="0.002"/>
@@ -146,7 +146,7 @@
             <joint name="R_ring2_flex" range="-0.0515694 1.9" armature="0.002"/>
             <geom name="R_ring2_collision" size="0.008 0.0183508" pos="-0.0183508 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
             <body name="R_ring3" pos="-0.0367017 0 0">
-              <joint name="R_ring3_flex" range="-0.140944 1.3" armature="0.002" axis="0 0 -1"/>
+              <joint name="R_ring3_flex" range="-0.273236 1.3" armature="0.002" axis="0 0 1"/>
               <geom name="R_ring3_collision" size="0.0072 0.0064" pos="-0.0064 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
               <site name="R_ring_tip" size="0.004" pos="-0.02 0 0"/>
             </body>
@@ -160,10 +160,10 @@
           <joint name="R_pinky1_spread" range="-0.433584 0.607047" armature="0.002" axis="0.223847 -0.506624 -0.832601"/>
           <geom name="R_pinky1_collision" size="0.0078 0.0125" pos="-0.0125 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
           <body name="R_pinky2" pos="-0.025 0 0">
-            <joint name="R_pinky2_flex" range="-0.396516 1.9" armature="0.002" axis="0 0 -1"/>
+            <joint name="R_pinky2_flex" range="-0.324533 1.9" armature="0.002"/>
             <geom name="R_pinky2_collision" size="0.0071 0.00675855" pos="-0.00675855 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
             <body name="R_pinky3" pos="-0.0135171 0 0">
-              <joint name="R_pinky3_flex" range="-0.215373 1.3" armature="0.002" axis="0 0 -1"/>
+              <joint name="R_pinky3_flex" range="-0.324533 1.3" armature="0.002"/>
               <geom name="R_pinky3_collision" size="0.0065 0.00675" pos="-0.00675 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
               <site name="R_pinky_tip" size="0.004" pos="-0.02 0 0"/>
             </body>
@@ -171,7 +171,7 @@
         </body>
       </body>
       <body name="R_thumb1" pos="-0.0515369 -0.0146378 0.0444075">
-        <joint name="R_thumb1_flex" range="0.143788 1.15875" armature="0.002" axis="-0.0714556 -0.240408 0.968038"/>
+        <joint name="R_thumb1_flex" range="-0.808752 0.206212" armature="0.002" axis="0.0714556 0.240408 -0.968038"/>
         <joint name="R_thumb1_spread" range="-0.249998 0.376593" armature="0.002" axis="0.285447 0.925 0.25079"/>
         <geom name="R_thumb1_collision" size="0.012 0.0175" pos="-0.0175 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
         <body name="R_thumb2" pos="-0.035 0 0">
@@ -179,7 +179,7 @@
           <joint name="R_thumb2_spread" range="-0.31431 0.311122" armature="0.002" axis="-0.168423 0.182915 0.968595"/>
           <geom name="R_thumb2_collision" size="0.0105 0.0141962" pos="-0.0141962 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
           <body name="R_thumb3" pos="-0.0283925 0 0">
-            <joint name="R_thumb3_flex" range="-0.202827 1.3" armature="0.002"/>
+            <joint name="R_thumb3_flex" range="-0.22648 1.3" armature="0.002" axis="0 0 -1"/>
             <geom name="R_thumb3_collision" size="0.0095 0.00525" pos="-0.00525 0 0" quat="0.707107 0 0.707107 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
             <site name="R_thumb_tip" size="0.004" pos="-0.02 0 0"/>
           </body>
@@ -575,7 +575,7 @@
     <general name="L_index1_flex" joint="L_index1_flex" ctrlrange="0.0192292 1.6" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="L_index1_spread" joint="L_index1_spread" ctrlrange="-0.42814 0.34674" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
     <general name="L_index2_flex" joint="L_index2_flex" ctrlrange="-0.324533 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="L_index3_flex" joint="L_index3_flex" ctrlrange="-0.347997 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
+    <general name="L_index3_flex" joint="L_index3_flex" ctrlrange="-0.324533 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
     <general name="L_middle1_flex" joint="L_middle1_flex" ctrlrange="0.0761894 1.6" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="L_middle1_spread" joint="L_middle1_spread" ctrlrange="-0.329986 0.430807" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
     <general name="L_middle2_flex" joint="L_middle2_flex" ctrlrange="-0.324533 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
@@ -583,36 +583,36 @@
     <general name="L_ring1_flex" joint="L_ring1_flex" ctrlrange="-0.00112584 1.6" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="L_ring1_spread" joint="L_ring1_spread" ctrlrange="-0.306714 0.566471" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
     <general name="L_ring2_flex" joint="L_ring2_flex" ctrlrange="-0.324533 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="L_ring3_flex" joint="L_ring3_flex" ctrlrange="-0.164406 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
+    <general name="L_ring3_flex" joint="L_ring3_flex" ctrlrange="-0.324533 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
     <general name="L_pinky1_flex" joint="L_pinky1_flex" ctrlrange="-0.121765 1.62244" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="L_pinky1_spread" joint="L_pinky1_spread" ctrlrange="-0.344015 0.584343" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="L_pinky2_flex" joint="L_pinky2_flex" ctrlrange="-0.278554 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="L_pinky3_flex" joint="L_pinky3_flex" ctrlrange="-0.189847 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
-    <general name="L_thumb1_flex" joint="L_thumb1_flex" ctrlrange="-0.0271948 1.08068" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
+    <general name="L_pinky2_flex" joint="L_pinky2_flex" ctrlrange="-0.324533 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
+    <general name="L_pinky3_flex" joint="L_pinky3_flex" ctrlrange="-0.324533 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
+    <general name="L_thumb1_flex" joint="L_thumb1_flex" ctrlrange="-0.730678 0.377195" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="L_thumb1_spread" joint="L_thumb1_spread" ctrlrange="-0.455461 0.25684" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="L_thumb2_flex" joint="L_thumb2_flex" ctrlrange="-0.310175 1.42179" ctrllimited="true" forcelimited="true" forcerange="-1.5 1.5" biastype="affine" gainprm="6" biasprm="0 -6 -0.219089"/>
     <general name="L_thumb2_spread" joint="L_thumb2_spread" ctrlrange="-0.523126 0.329949" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
     <general name="L_thumb3_flex" joint="L_thumb3_flex" ctrlrange="-0.111922 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.8 0.8" biastype="affine" gainprm="3.2" biasprm="0 -3.2 -0.16"/>
     <general name="R_index1_flex" joint="R_index1_flex" ctrlrange="0.0233886 1.6" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="R_index1_spread" joint="R_index1_spread" ctrlrange="-0.323293 0.273923" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="R_index2_flex" joint="R_index2_flex" ctrlrange="-0.169112 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
+    <general name="R_index2_flex" joint="R_index2_flex" ctrlrange="-0.324533 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
     <general name="R_index3_flex" joint="R_index3_flex" ctrlrange="-0.0120376 1.57668" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
     <general name="R_middle1_flex" joint="R_middle1_flex" ctrlrange="0.0425888 1.6" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="R_middle1_spread" joint="R_middle1_spread" ctrlrange="-0.451835 0.274316" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="R_middle2_flex" joint="R_middle2_flex" ctrlrange="-0.31245 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
+    <general name="R_middle2_flex" joint="R_middle2_flex" ctrlrange="-0.324533 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
     <general name="R_middle3_flex" joint="R_middle3_flex" ctrlrange="-0.084642 1.45382" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
     <general name="R_ring1_flex" joint="R_ring1_flex" ctrlrange="-0.103717 1.6" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="R_ring1_spread" joint="R_ring1_spread" ctrlrange="-0.538752 0.27567" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
     <general name="R_ring2_flex" joint="R_ring2_flex" ctrlrange="-0.0515694 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="R_ring3_flex" joint="R_ring3_flex" ctrlrange="-0.140944 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
+    <general name="R_ring3_flex" joint="R_ring3_flex" ctrlrange="-0.273236 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
     <general name="R_pinky1_flex" joint="R_pinky1_flex" ctrlrange="0.232739 1.6" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="R_pinky1_spread" joint="R_pinky1_spread" ctrlrange="-0.433584 0.607047" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="R_pinky2_flex" joint="R_pinky2_flex" ctrlrange="-0.396516 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="R_pinky3_flex" joint="R_pinky3_flex" ctrlrange="-0.215373 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
-    <general name="R_thumb1_flex" joint="R_thumb1_flex" ctrlrange="0.143788 1.15875" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
+    <general name="R_pinky2_flex" joint="R_pinky2_flex" ctrlrange="-0.324533 1.9" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
+    <general name="R_pinky3_flex" joint="R_pinky3_flex" ctrlrange="-0.324533 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.5 0.5" biastype="affine" gainprm="2" biasprm="0 -2 -0.126491"/>
+    <general name="R_thumb1_flex" joint="R_thumb1_flex" ctrlrange="-0.808752 0.206212" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="R_thumb1_spread" joint="R_thumb1_spread" ctrlrange="-0.249998 0.376593" ctrllimited="true" forcelimited="true" forcerange="-2 2" biastype="affine" gainprm="8" biasprm="0 -8 -0.252982"/>
     <general name="R_thumb2_flex" joint="R_thumb2_flex" ctrlrange="-0.124258 1.38855" ctrllimited="true" forcelimited="true" forcerange="-1.5 1.5" biastype="affine" gainprm="6" biasprm="0 -6 -0.219089"/>
     <general name="R_thumb2_spread" joint="R_thumb2_spread" ctrlrange="-0.31431 0.311122" ctrllimited="true" forcelimited="true" forcerange="-1 1" biastype="affine" gainprm="4" biasprm="0 -4 -0.178885"/>
-    <general name="R_thumb3_flex" joint="R_thumb3_flex" ctrlrange="-0.202827 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.8 0.8" biastype="affine" gainprm="3.2" biasprm="0 -3.2 -0.16"/>
+    <general name="R_thumb3_flex" joint="R_thumb3_flex" ctrlrange="-0.22648 1.3" ctrllimited="true" forcelimited="true" forcerange="-0.8 0.8" biastype="affine" gainprm="3.2" biasprm="0 -3.2 -0.16"/>
   </actuator>
 </mujoco>

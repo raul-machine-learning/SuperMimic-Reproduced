@@ -25,7 +25,11 @@ from supermimic.data.sweep_mocap import PROP_MESHES
 
 ROOT = Path(__file__).resolve().parents[2]
 HANDS_XML = ROOT / "src/supermimic/assets/capsule_hands/capsule_hands.xml"
-CONTACT_RGBA = np.array([0.15, 0.85, 0.30, 1.0])
+STATE_RGBA = {1: np.array([0.15, 0.85, 0.30, 1.0]), 2: np.array([1.0, 0.80, 0.10, 1.0]), 3: np.array([0.95, 0.15, 0.15, 1.0])}
+LEGENDS = {
+    "audit": [(1, "touching the held prop (gap < 5 mm)"), (2, "glove loaded, gap < 2 cm"), (3, "glove loaded, gap > 2 cm")],
+    "physics": [(1, "in contact with the held prop"), (3, "glove loaded, no contact")],
+}
 PROP_RGBA = {"cleaningtools_broom": [0.80, 0.55, 0.30, 1], "cleaningtools_dustpan": [0.30, 0.50, 0.80, 1],
              "TrashBucket_chip": [0.55, 0.60, 0.55, 1]}
 
@@ -67,6 +71,17 @@ def build_model(clip: dict, mocap_dir: Path, ghosts: bool) -> tuple[mujoco.MjMod
     return spec.compile(), props
 
 
+def draw_legend(im: Image.Image, xy: tuple[int, int], rows: list[tuple[int, str]], font_small) -> None:
+    dr = ImageDraw.Draw(im, "RGBA")
+    x, y = xy
+    w = max(dr.textlength(s, font=font_small) for _, s in rows) + 44
+    dr.rounded_rectangle([x, y, x + w, y + 14 + 24 * len(rows)], radius=8, fill=(20, 24, 32, 160))
+    for i, (st, s) in enumerate(rows):
+        yy = y + 9 + 24 * i
+        dr.rectangle([x + 10, yy + 3, x + 26, yy + 17], fill=tuple(int(v * 255) for v in STATE_RGBA[st]))
+        dr.text((x + 34, yy), s, font=font_small, fill=(230, 235, 245, 255))
+
+
 def add_dots(scene: mujoco.MjvScene, pts: np.ndarray, radius: float = 0.0035) -> None:
     for p in pts:
         if scene.ngeom >= scene.maxgeom:
@@ -78,22 +93,32 @@ def add_dots(scene: mujoco.MjvScene, pts: np.ndarray, radius: float = 0.0035) ->
 
 def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", rollout: Path | None = None, mocap_dir: Path | None = None,
          title: str = "Capsule hands: mocap replay", subtitle: str = "kinematic replay, no physics", fps: int = 30,
-         width: int = 1600, height: int = 900, hand_distance: float = 0.42, view_yaw: float = 35.0) -> None:
+         width: int = 1600, height: int = 900, hand_distance: float = 0.42, view_yaw: float = 35.0, ghosts: bool | None = None,
+         legend: str | None = None) -> None:
+    """``ghosts``: draw the mocap props translucent (default: for physics rollouts); ``legend``: audit | physics
+    (default: from the rollout's keys)."""
     c = dict(np.load(clip))
     r = dict(np.load(rollout)) if rollout else c
     mocap_dir = mocap_dir or Path(str(c["mocap_dir"]))
-    model, props = build_model(c, mocap_dir, ghosts=rollout is not None)
+    if ghosts is None:
+        ghosts = rollout is not None and "gap" not in r
+    model, props = build_model(c, mocap_dir, ghosts=ghosts)
     data = mujoco.MjData(model)
     sides = ("L", "R")
     root_adr = [model.jnt_qposadr[model.joint(f"{S}_hand_root").id] for S in sides]
     names = [str(n) for n in c["joint_names"]]
     qadr = np.array([model.jnt_qposadr[model.joint(n).id] for n in names])
     mocap_of = {n: model.body_mocapid[model.body(n).id] for n in props}
-    ghost_of = {n: model.body_mocapid[model.body(n + "_ghost").id] for n in props} if rollout else {}
+    ghost_of = {n: model.body_mocapid[model.body(n + "_ghost").id] for n in props} if ghosts else {}
 
     hand_bodies = {S: [b for b in range(model.nbody) if model.body(b).name.startswith(f"{S}_")] for S in sides}
-    hand_geoms = {S: [[g for g in range(model.ngeom) if model.geom_bodyid[g] == b] for b in hand_bodies[S]] for S in sides}
+    state_geoms = {}
+    if "body_state" in r:
+        for S in sides:
+            ids = [model.body(str(n)).id for n in r[f"body_names_{S}"]]
+            state_geoms[S] = [[g for g in range(model.ngeom) if model.geom_bodyid[g] == b] for b in ids]
     base_rgba = model.geom_rgba.copy()
+    legend_rows = LEGENDS.get(legend or ("audit" if "gap" in r else "physics" if "body_state" in r else ""), [])
 
     W2, H2 = width // 2, height // 2
     r_main = mujoco.Renderer(model, height, W2)
@@ -128,11 +153,12 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", ro
             if ghost_of:
                 data.mocap_pos[ghost_of[n]], data.mocap_quat[ghost_of[n]] = c["prop_pos"][tc, j], c["prop_quat"][tc, j]
         model.geom_rgba[:] = base_rgba
-        if "contact" in r:
+        if state_geoms:
             for k, S in enumerate(sides):
-                for i, gs in enumerate(hand_geoms[S]):
-                    if r["contact"][t, k, i]:
-                        model.geom_rgba[gs] = CONTACT_RGBA
+                for i, gs in enumerate(state_geoms[S]):
+                    st = int(r["body_state"][t, k, i])
+                    if st:
+                        model.geom_rgba[gs] = STATE_RGBA[st]
         mujoco.mj_forward(model, data)
 
         focus = {"main": c["base_pos"][tc].mean(0) * [1, 1, 0] + [0, 0, c["table_center"][2] * 2 + 0.05],
@@ -155,7 +181,10 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", ro
         im = Image.fromarray(frame)
         ImageDraw.Draw(im).line([(W2, 0), (W2, height)], fill=(30, 30, 30), width=2)
         ImageDraw.Draw(im).line([(W2, H2), (width, H2)], fill=(30, 30, 30), width=2)
-        label(im, (14, 14), [title, f"t = {times[t] - times[0]:4.1f} s   ({subtitle})", "dark dots: mocap hand joints"], font, font_small)
+        label(im, (14, 14), [title, f"t = {times[t] - times[0]:4.1f} s   ({subtitle})", "dark dots: mocap hand joints"]
+              + (["translucent props: mocap poses"] if ghost_of else []), font, font_small)
+        if legend_rows:
+            draw_legend(im, (14, height - 20 - 24 * len(legend_rows)), legend_rows, font_small)
         for S, y0 in (("L", 10), ("R", H2 + 10)):
             label(im, (W2 + 10, y0), [f"{'left' if S == 'L' else 'right'} hand", "21 hinges, capsules from the mocap bones"], font, font_small)
         ff.stdin.write(np.asarray(im).tobytes())

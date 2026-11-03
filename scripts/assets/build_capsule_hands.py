@@ -2,17 +2,18 @@
 
   uv run python scripts/assets/build_capsule_hands.py
 
-The hands are the actor's own, read straight from the mocap at real scale: no robot and no retargeting in between. Each hand is a tree of the mocap's hand bones,
-rooted at the ``{Left,Right}Hand`` bone on a free joint:
+The hands are the actor's own, read straight from the mocap at real scale: no robot and no retargeting in between.
+Each hand is a tree of the mocap's hand bones, rooted at the ``{Left,Right}Hand`` bone on a free joint:
 
   palm      Hand + the four InHand* metacarpal bones (they rotate < 1 deg in the recording: rigid)
   fingers   *1 knuckle: 2 hinges (flexion, spread), *2 and *3: 1 hinge each
   thumb     Thumb1: 2 hinges, Thumb2: 2 hinges, Thumb3: 1 hinge
 
 Hinge axes come from the recorded local bone rotations: the principal axes of their rotation vectors, flexion
-first (signed so the clip's mean flexion is positive). The angles are the intrinsic Euler decomposition of each
-local rotation about those axes; the dropped third axis is under 1 deg in this recording. Every bone is a capsule
-from its joint to its child's; the palm is capsules from the wrist to each metacarpal and along the metacarpals.
+first. The angles are the intrinsic Euler decomposition of each local rotation about those axes; the dropped third
+axis is under 1 deg in this recording. Flexion is signed geometrically: a positive angle moves the fingertip toward
+the wrist (the thumb tip toward the middle finger's knuckle), at the clip's median pose. Every bone is a capsule from
+its joint to its child's; the palm is capsules from the wrist to each metacarpal and along the metacarpals.
 Fingers are position-driven (effort-limited, like tendons); the free roots are driven by whoever uses the model.
 
 Writes ``src/supermimic/assets/capsule_hands/capsule_hands.xml`` and ``data/hands/<clip>.npz`` holding, on the
@@ -61,12 +62,13 @@ def local_frames(human, b: int) -> tuple[Rotation, np.ndarray]:
     return rp.inv() * Rotation.from_quat(human.quat[:, b], scalar_first=True), rp.inv().apply(human.pos[:, b] - human.pos[:, p])
 
 
-def hinge_axes(r: Rotation) -> np.ndarray:
-    """(3, 3) rows: principal axes of the rotation vectors (uncentered), flexion first, mean flexion >= 0."""
+def hinge_axes(r: Rotation, flip: bool) -> np.ndarray:
+    """(3, 3) rows: principal axes of the rotation vectors (uncentered), flexion first, mean flexion >= 0 unless
+    ``flip``; the rows form a right-handed frame."""
     rv = r.as_rotvec()
     w, v = np.linalg.eigh(rv.T @ rv / len(rv))
     a = v[:, ::-1].T.copy()
-    if (rv @ a[0]).mean() < 0:
+    if ((rv @ a[0]).mean() < 0) != flip:
         a[0] = -a[0]
     a[2] = np.cross(a[1], a[0])
     return a
@@ -88,14 +90,9 @@ def add_capsule(body, name: str, a: np.ndarray, b: np.ndarray, radius: float, rg
                   rgba=rgba, density=1000.0, condim=4, friction=[1.0, 0.005, 0.0001])
 
 
-def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023_hands", out_dir: Path = ROOT / "data/hands",
-         asset: Path = ASSET) -> None:
-    human = load_human(mocap_dir)
-    props = load_props(mocap_dir)
-    pressure = load_pressure(mocap_dir)
-    T = len(human.times)
+def make_spec(human, flip: set[str]) -> tuple[mujoco.MjSpec, dict[str, np.ndarray], list]:
+    """The two hands; ``flip``: flexion hinges whose mean-flexion sign is reversed."""
     idx = human.index
-
     spec = mujoco.MjSpec()
     spec.modelname = "capsule_hands"
     spec.compiler.degree = False
@@ -119,7 +116,7 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
                 r, lp = local_frames(human, idx(bone))
                 b = body_parent.add_body(name=f"{prefix}{k + 1}", pos=lp.mean(0))
                 n_h, flex_max = joints[str(k + 1)]
-                axes = hinge_axes(r)
+                axes = hinge_axes(r, f"{prefix}{k + 1}_flex" in flip)
                 ang, dropped = decompose(r, axes)
                 kinds = ["flex", "spread"][:n_h]
                 if n_h == 1:
@@ -171,7 +168,48 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
         a.biasprm = [0.0, -kp, -kd] + [0.0] * 7
         a.forcelimited, a.forcerange = True, [-effort, effort]
         a.ctrllimited, a.ctrlrange = True, j.range
+    return spec, joint_angles, report
 
+
+def flexion_flips(model: mujoco.MjModel, joint_angles: dict[str, np.ndarray], step: float = 0.05) -> set[str]:
+    """Flexion hinges whose positive direction moves the tip away from the palm, at the clip's median pose."""
+    data = mujoco.MjData(model)
+    hinges = [n for n in joint_angles]
+    for n in hinges:
+        data.qpos[model.jnt_qposadr[model.joint(n).id]] = np.median(joint_angles[n])
+    flips = set()
+    for n in hinges:
+        if not n.endswith("_flex"):
+            continue
+        S, rest = n.split("_", 1)
+        finger = rest[: next(i for i, ch in enumerate(rest) if ch.isdigit())]
+        tip = model.site(f"{S}_{finger}_tip").id
+        target = model.body(f"{S}_middle1").id if finger == "thumb" else model.body(f"{S}_hand").id
+        a = model.jnt_qposadr[model.joint(n).id]
+        q0 = data.qpos[a]
+        dist = []
+        for dq in (step, -step):
+            data.qpos[a] = q0 + dq
+            mujoco.mj_kinematics(model, data)
+            dist.append(np.linalg.norm(data.site_xpos[tip] - data.xpos[target]))
+        data.qpos[a] = q0
+        if dist[0] > dist[1]:
+            flips.add(n)
+    return flips
+
+
+def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023_hands", out_dir: Path = ROOT / "data/hands",
+         asset: Path = ASSET) -> None:
+    human = load_human(mocap_dir)
+    props = load_props(mocap_dir)
+    pressure = load_pressure(mocap_dir)
+    T = len(human.times)
+    idx = human.index
+
+    spec, joint_angles, _ = make_spec(human, set())
+    flips = flexion_flips(spec.compile(), joint_angles)
+    spec, joint_angles, report = make_spec(human, flips)
+    assert not flexion_flips(spec.compile(), joint_angles), "flexion signs did not settle"
     model = spec.compile()
     asset.parent.mkdir(parents=True, exist_ok=True)
     asset.write_text(spec.to_xml())
@@ -215,11 +253,11 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
     print(f"  fingertip replay error: mean {err.mean() * 1000:.1f} mm, max {err.max() * 1000:.1f} mm")
     worst = max(report, key=lambda x: x[2])
     print(f"  largest rotation left out by the hinges: {worst[2]:.1f} deg ({worst[0]})")
+    print(f"  flexion signs reversed from the mean-flexion guess: {', '.join(sorted(flips)) or 'none'}")
     for n in hinges:
-        if n.startswith("L_"):
-            j = model.joint(n)
-            a = joint_angles[n]
-            print(f"  {n:18s} data {np.degrees(a.min()):+6.1f}..{np.degrees(a.max()):+6.1f} deg   range {np.degrees(j.range[0]):+6.1f}..{np.degrees(j.range[1]):+6.1f}")
+        j = model.joint(n)
+        a = joint_angles[n]
+        print(f"  {n:18s} data {np.degrees(a.min()):+6.1f}..{np.degrees(a.max()):+6.1f} deg   range {np.degrees(j.range[0]):+6.1f}..{np.degrees(j.range[1]):+6.1f}")
 
 
 if __name__ == "__main__":
