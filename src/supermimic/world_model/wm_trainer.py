@@ -31,6 +31,14 @@ def reference_at(lib: MotionLibrary, frame: torch.Tensor) -> ReferenceFrame:
     return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w, r.joint_pos, r.prop_pos_w, r.prop_quat_w, pressed)
 
 
+def _zero_nonfinite_grads(params, grad_norm: torch.Tensor) -> None:
+    """Zero every gradient when ``grad_norm`` is not finite (no host sync), so one bad batch cannot poison the model."""
+    ok = torch.isfinite(grad_norm)
+    for p in params:
+        if p.grad is not None:
+            p.grad = torch.where(ok, p.grad, torch.zeros_like(p.grad))
+
+
 class WorldModelTrainer:
     def __init__(self, wm: WorldModel, lib: MotionLibrary, cfg: WMTrainerCfg):
         self.wm = wm
@@ -61,6 +69,7 @@ class WorldModelTrainer:
             loss.backward()
             allreduce_grads(self.wm)
             gn = torch.nn.utils.clip_grad_norm_(self.wm.parameters(), self.cfg.grad_clip)
+            _zero_nonfinite_grads(self.wm.parameters(), gn)
             self.opt.step()
             m["loss"] = loss.detach()
             m["grad_norm"] = gn.detach()

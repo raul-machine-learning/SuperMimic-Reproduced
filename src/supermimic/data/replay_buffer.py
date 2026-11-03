@@ -64,9 +64,11 @@ class ReplayBuffer:
     @torch.no_grad()
     def add(self, env_ids, s, a, a_exec, xi, r, done, frame, clip, terminal, ep_start) -> None:
         p = self.ptr[env_ids]
-        self.s[env_ids, p] = s
-        self.a[env_ids, p] = a
-        self.a_exec[env_ids, p] = a_exec
+        # A blown-up simulator state (non-finite) is kept out of every window and start.
+        finite = torch.isfinite(s).all(-1) & torch.isfinite(a_exec).all(-1)
+        self.s[env_ids, p] = torch.nan_to_num(s, nan=0.0, posinf=0.0, neginf=0.0)
+        self.a[env_ids, p] = torch.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
+        self.a_exec[env_ids, p] = torch.nan_to_num(a_exec, nan=0.0, posinf=0.0, neginf=0.0)
         self.xi[env_ids, p] = xi
         self.r[env_ids, p] = r
         self.done[env_ids, p] = done
@@ -75,7 +77,7 @@ class ReplayBuffer:
         self.ep_id[env_ids, p] = self.ep_counter[env_ids]
         self.terminal[env_ids, p] = terminal
         self.ep_start[env_ids, p] = ep_start
-        self.valid[env_ids, p] = True
+        self.valid[env_ids, p] = finite
         self.ptr[env_ids] = (p + 1) % self.T
         self.total_rows += int(env_ids.numel())
 

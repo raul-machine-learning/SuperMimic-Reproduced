@@ -12,6 +12,7 @@ from supermimic.imagination.objective import gae_targets, policy_objective
 from supermimic.imagination.rollout import ImagRollout, imagine
 from supermimic.policy.nets import Critic, Policy
 from supermimic.training.distributed import allreduce_grads
+from supermimic.world_model.wm_trainer import _zero_nonfinite_grads
 from supermimic.world_model.world_model import WorldModel
 
 
@@ -78,7 +79,10 @@ class PolicyTrainer:
         allreduce_grads(self.policy)
         gn = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), cfg.grad_clip_norm)
         torch.nn.utils.clip_grad_value_(self.policy.parameters(), cfg.grad_clip_value)
-        self.opt.step()
+        # A non-finite gradient (a diverged imagined rollout) would poison the policy: skip that update.
+        skipped = not bool(torch.isfinite(gn))
+        if not skipped:
+            self.opt.step()
         self.wm.requires_grad_(True)
         self.critic.requires_grad_(True)
 
@@ -90,6 +94,7 @@ class PolicyTrainer:
             "imag_dhat_mean": float(ro.dhat[1:].mean().detach()),
             "policy_grad_norm": float(gn),
             "action_abs_mean": float(ro.actions.abs().mean().detach()),
+            "skipped_update": float(skipped),
         }
         for k, v in ro.reward_terms.items():
             metrics[f"imag_r/{k}"] = v
@@ -119,7 +124,8 @@ class PolicyTrainer:
                     self.critic_opt.zero_grad(set_to_none=True)
                     closs.backward()
                     allreduce_grads(self.critic)
-                    torch.nn.utils.clip_grad_norm_(self.critic.parameters(), cfg.critic_grad_clip)
+                    cgn = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), cfg.critic_grad_clip)
+                    _zero_nonfinite_grads(self.critic.parameters(), cgn)
                     self.critic_opt.step()
                     last = closs.detach()
             metrics["critic_loss"] = float(last)

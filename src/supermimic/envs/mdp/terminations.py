@@ -14,6 +14,12 @@ if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
 
+def bad_sim_state(env: ManagerBasedRlEnv, max_vel: float = 1.0e3) -> torch.Tensor:
+    """The simulator state is non-finite or some velocity exceeds ``max_vel`` (a blown-up step)."""
+    qpos, qvel = env.sim.data.qpos[:], env.sim.data.qvel[:]
+    return ~torch.isfinite(qpos).all(-1) | ~torch.isfinite(qvel).all(-1) | (qvel.abs().amax(-1) > max_vel)
+
+
 def bad_root_height(env: ManagerBasedRlEnv, command_name: str, threshold: float = 0.25) -> torch.Tensor:
     cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
     return (cmd.root_pos_w[:, 2] - cmd.robot_root_pos_w[:, 2]).abs() > threshold

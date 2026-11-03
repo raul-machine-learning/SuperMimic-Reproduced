@@ -223,6 +223,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
     terminations = {
         "time_out": TerminationTermCfg(func=base_mdp.time_out, time_out=True),
         "clip_end": TerminationTermCfg(func=sm_term.clip_end, params={"command_name": "motion"}, time_out=True),
+        "bad_sim_state": TerminationTermCfg(func=sm_term.bad_sim_state),
     }
     if ROBOT.termination == "wrists":
         terminations["wrist_pos"] = TerminationTermCfg(func=sm_term.bad_wrist_pos, params={"command_name": "motion", "threshold": a.root_height_threshold})
