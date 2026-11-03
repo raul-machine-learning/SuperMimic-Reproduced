@@ -111,9 +111,11 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", ro
     c_times = c["times"]
     stride = max(1, round((len(times) - 1) / (times[-1] - times[0]) / fps))
     out.parent.mkdir(parents=True, exist_ok=True)
+    # WebM (VP9) plays in the editor's built-in preview, which has no H.264 decoder.
+    codec = (["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "32", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4"] if out.suffix == ".webm"
+             else ["-c:v", "libx264", "-crf", "18", "-movflags", "+faststart"])
     ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps),
-                           "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-movflags", "+faststart", str(out)],
-                          stdin=subprocess.PIPE)
+                           "-i", "-", *codec, "-pix_fmt", "yuv420p", str(out)], stdin=subprocess.PIPE)
     cams = {k: mujoco.MjvCamera() for k in ("main", "L", "R")}
     targets: dict[str, np.ndarray] = {}
     for t in range(0, len(times), stride):
