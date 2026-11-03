@@ -30,12 +30,17 @@ if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
 
+def _robot_default(name: str, value: float):
+    """Field default, unless the robot overrides it (``ROBOT.reward_overrides``)."""
+    return field(default_factory=lambda: dict(ROBOT.reward_overrides).get(name, value))
+
+
 @dataclass
 class TrackingRewardCfg:
-    std_body_pos: float = 0.3
-    std_body_ori: float = 0.4
-    std_body_lin_vel: float = 1.0
-    std_body_ang_vel: float = 3.14
+    std_body_pos: float = _robot_default("std_body_pos", 0.3)
+    std_body_ori: float = _robot_default("std_body_ori", 0.4)
+    std_body_lin_vel: float = _robot_default("std_body_lin_vel", 1.0)
+    std_body_ang_vel: float = _robot_default("std_body_ang_vel", 3.14)
     std_root_pos: float = 0.3
     std_root_ori: float = 0.4
     w_body_pos: float = 1.0

@@ -10,6 +10,7 @@ from supermimic.robots import ROBOT
 
 pytestmark = [pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"), requires_sweep]
 NJ, NA = ROBOT.nj, ROBOT.na
+TRACKED = ROBOT.tracked_bodies
 
 
 @pytest.fixture(scope="module")
@@ -70,13 +71,14 @@ def test_reward_terms_match_mjlab(setup):
         ours = heads.reward(s, env.action_manager.action, env.action_manager.prev_action, _ref_from_command(cmd))
         asset_cfg = SceneEntityCfg("robot", joint_names=ROBOT.limit_joint_names)
         asset_cfg.resolve(env.scene)
+        rc = heads.reward_cfg
         theirs = {
-            "motion_global_root_pos": 0.5 * mdp.motion_global_anchor_position_error_exp(env, "motion", 0.3),
-            "motion_global_root_ori": 0.5 * mdp.motion_global_anchor_orientation_error_exp(env, "motion", 0.4),
-            "motion_body_pos": mdp.motion_relative_body_position_error_exp(env, "motion", 0.3),
-            "motion_body_ori": mdp.motion_relative_body_orientation_error_exp(env, "motion", 0.4),
-            "motion_body_lin_vel": mdp.motion_global_body_linear_velocity_error_exp(env, "motion", 1.0),
-            "motion_body_ang_vel": mdp.motion_global_body_angular_velocity_error_exp(env, "motion", 3.14),
+            "motion_global_root_pos": 0.5 * mdp.motion_global_anchor_position_error_exp(env, "motion", rc.std_root_pos),
+            "motion_global_root_ori": 0.5 * mdp.motion_global_anchor_orientation_error_exp(env, "motion", rc.std_root_ori),
+            "motion_body_pos": mdp.motion_relative_body_position_error_exp(env, "motion", rc.std_body_pos),
+            "motion_body_ori": mdp.motion_relative_body_orientation_error_exp(env, "motion", rc.std_body_ori),
+            "motion_body_lin_vel": mdp.motion_global_body_linear_velocity_error_exp(env, "motion", rc.std_body_lin_vel),
+            "motion_body_ang_vel": mdp.motion_global_body_angular_velocity_error_exp(env, "motion", rc.std_body_ang_vel),
             "action_rate_l2": -0.1 * base_mdp.action_rate_l2(env),
             "joint_limit": -2.0 * base_mdp.joint_pos_limits(env, asset_cfg),
         }
@@ -133,15 +135,28 @@ def test_termination_matches_env(setup):
         env.step(1.0 * torch.randn(env.num_envs, NA, device=env.device))
         s = io.read()
         ref = _ref_from_command(cmd)
-        b = heads.robot_bodies(s)
-        f = heads.termination_features(b["root_pos"], b["root_quat"], ref)
-        theirs_h = sm_term.bad_root_height(env, "motion", 0.25)
-        theirs_t = sm_term.bad_root_tilt(env, "motion", 0.8)
-        # Compare the continuous quantities (booleans could flip on ties).
-        h_env = (cmd.root_pos_w[:, 2] - cmd.robot_root_pos_w[:, 2])
-        np.testing.assert_allclose(f[:, 0].cpu().numpy(), h_env.cpu().numpy(), atol=2e-5)
-        assert torch.equal((f[:, 0].abs() > 0.25), theirs_h) or (f[:, 0].abs() - 0.25).abs().min() < 1e-4
-        assert torch.equal((f[:, 1].abs() > 0.8), theirs_t) or (f[:, 1].abs() - 0.8).abs().min() < 1e-4
+        f = heads.termination_features(s, ref)
+        th, tt = ROBOT.termination_thresholds
+        if ROBOT.termination == "wrists":
+            from mjlab.utils.lab_api.math import quat_error_magnitude
+
+            theirs_h = sm_term.bad_wrist_pos(env, "motion", th)
+            theirs_t = sm_term.bad_wrist_ori(env, "motion", tt)
+            # Independent check: the hand bodies' world poses (FK of the state) against the reference bodies.
+            b = heads.robot_bodies(s)
+            hands = [TRACKED.index(f"{S}_hand") for S in "LR"]
+            dp = (b["pos"][:, hands] - ref.body_pos_w[:, hands]).norm(dim=-1).amax(-1)
+            da = quat_error_magnitude(b["quat"][:, hands], ref.body_quat_w[:, hands]).amax(-1)
+            np.testing.assert_allclose(f[:, 0].cpu().numpy(), dp.cpu().numpy(), atol=2e-5)
+            np.testing.assert_allclose(f[:, 1].cpu().numpy(), da.cpu().numpy(), atol=1e-3)
+        else:
+            theirs_h = sm_term.bad_root_height(env, "motion", th)
+            theirs_t = sm_term.bad_root_tilt(env, "motion", tt)
+            # Compare the continuous quantities (booleans could flip on ties).
+            h_env = (cmd.root_pos_w[:, 2] - cmd.robot_root_pos_w[:, 2])
+            np.testing.assert_allclose(f[:, 0].cpu().numpy(), h_env.cpu().numpy(), atol=2e-5)
+        assert torch.equal((f[:, 0].abs() > th), theirs_h) or (f[:, 0].abs() - th).abs().min() < 1e-4
+        assert torch.equal((f[:, 1].abs() > tt), theirs_t) or (f[:, 1].abs() - tt).abs().min() < 1e-4
 
 
 def test_anchor_relative_obs_matches_env():

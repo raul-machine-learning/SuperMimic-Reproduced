@@ -1,30 +1,28 @@
-"""Differentiable batched forward kinematics for the Unitree G1 (torch).
+"""Differentiable batched forward kinematics for a floating-base MuJoCo tree (torch).
 
-Built from a compiled ``mujoco.MjModel`` of ``g1.xml`` so the tree, joint axes,
-anchors and ``qpos0`` are exactly MuJoCo's. Reproduces, for every body:
+Built from a compiled ``mujoco.MjModel`` (the G1, G1 + Inspire hands, the capsule-hand rig) so the tree, joint
+axes, anchors and ``qpos0`` are exactly MuJoCo's. Reproduces, for every body:
 
 * ``xpos`` / ``xquat``                      (link frame origin pose, world)
 * link-frame-origin linear velocity, world  (== mjlab ``body_link_lin_vel_w``)
 * angular velocity, world                   (== mjlab ``body_link_ang_vel_w``)
 
-given ``qpos`` (36: root pos, root quat wxyz, 29 hinges) and ``qvel`` (35: root
-linear velocity in world, root angular velocity in **body** frame, 29 hinge rates),
-i.e. MuJoCo's free-joint conventions.
+given ``qpos`` (root pos, root quat wxyz, then the joints) and ``qvel`` (root linear velocity in world, root
+angular velocity in **body** frame, then the joint rates), i.e. MuJoCo's free-joint conventions.
 
 Quaternion math is element-wise (no 3x3 matmuls) so results are unaffected by TF32.
-Position FK follows ``mj_kinematics`` (hinge rotates about its anchor by
-``qpos - qpos0``); velocities are propagated down the tree:
+Position FK follows ``mj_kinematics``: a body's joints act in order, a hinge rotating about its anchor by
+``qpos - qpos0``, a slide translating along its axis by ``qpos - qpos0``. Velocities are propagated down the tree:
 
-    w_b = w_parent + axis_w * qdot
-    v_b = v_parent + w_parent x (p_b - p_parent) + (axis_w * qdot) x (p_b - anchor_w)
+    w_b = w_parent + sum_hinges axis_w * qdot
+    v_b = v_parent + w_parent x (p_b - p_parent) + sum_hinges (axis_w * qdot) x (p_b - anchor_w) + sum_slides axis_w * qdot
 
-which equals MuJoCo's ``cvel`` transported to the body origin (``mj_objectVelocity``
-with ``flg_local=0``).
+which equals MuJoCo's ``cvel`` transported to the body origin (``mj_objectVelocity`` with ``flg_local=0``).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import mujoco
 import numpy as np
@@ -32,18 +30,31 @@ import torch
 
 from supermimic.kinematics.rotations import quat_apply, quat_from_angle_axis, quat_mul, quat_normalize
 
+_HINGE = mujoco.mjtJoint.mjJNT_HINGE
+_SLIDE = mujoco.mjtJoint.mjJNT_SLIDE
+_FREE = mujoco.mjtJoint.mjJNT_FREE
+
+
+@dataclass
+class _Joint:
+    joint_type: int  # mjJNT_HINGE / mjJNT_SLIDE
+    qpos_adr: int
+    dof_adr: int
+    pos: torch.Tensor  # (3,) anchor in the body frame
+    axis: torch.Tensor  # (3,) in the body frame
+    qpos0: float
+
 
 @dataclass
 class _BodyLink:
     body_id: int  # MuJoCo body id (1..nbody-1)
     parent_index: int  # index into our body list (0..nb-1), -1 for the root
-    joint_type: int  # mjJNT_FREE / mjJNT_HINGE / -1 (fixed)
-    qpos_adr: int
-    dof_adr: int
+    free: bool = False
+    joints: list[_Joint] = field(default_factory=list)
 
 
 class G1Kinematics:
-    """Batched differentiable FK for a MuJoCo single-tree humanoid (G1)."""
+    """Batched differentiable FK for a MuJoCo single-tree model with a free root."""
 
     def __init__(
         self,
@@ -58,43 +69,27 @@ class G1Kinematics:
         self.nv = model.nv
         self.body_names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(1, model.nbody)]
         self.joint_names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(model.njnt)]
+        t = lambda a: torch.as_tensor(np.asarray(a), dtype=dtype, device=self.device)  # noqa: E731
 
         links: list[_BodyLink] = []
         for b in range(1, model.nbody):
             parent = int(model.body_parentid[b])
-            parent_index = -1 if parent == 0 else parent - 1
             assert parent < b, "MuJoCo bodies are topologically ordered"
-            njnt = int(model.body_jntnum[b])
-            if njnt == 0:
-                links.append(_BodyLink(b, parent_index, -1, -1, -1))
-                continue
-            assert njnt == 1, f"body {b} has {njnt} joints; only 0/1 supported"
-            j = int(model.body_jntadr[b])
-            jt = int(model.jnt_type[j])
-            assert jt in (mujoco.mjtJoint.mjJNT_FREE, mujoco.mjtJoint.mjJNT_HINGE), f"joint type {jt}"
-            links.append(_BodyLink(b, parent_index, jt, int(model.jnt_qposadr[j]), int(model.jnt_dofadr[j])))
-        assert links[0].joint_type == mujoco.mjtJoint.mjJNT_FREE and links[0].parent_index == -1
+            link = _BodyLink(b, -1 if parent == 0 else parent - 1)
+            for j in range(int(model.body_jntadr[b]), int(model.body_jntadr[b]) + int(model.body_jntnum[b])):
+                jt = int(model.jnt_type[j])
+                if jt == _FREE:
+                    assert b == 1 and model.body_jntnum[b] == 1, "only the root body may carry the free joint"
+                    link.free = True
+                    continue
+                assert jt in (_HINGE, _SLIDE), f"joint type {jt}"
+                link.joints.append(_Joint(jt, int(model.jnt_qposadr[j]), int(model.jnt_dofadr[j]), t(model.jnt_pos[j]),
+                                          t(model.jnt_axis[j]), float(model.qpos0[model.jnt_qposadr[j]])))
+            links.append(link)
+        assert links[0].free and links[0].parent_index == -1
         self.links = links
-
-        t = lambda a: torch.as_tensor(np.asarray(a), dtype=dtype, device=self.device)  # noqa: E731
         self.body_pos = t(model.body_pos[1:])  # (nb,3)
         self.body_quat = t(model.body_quat[1:])  # (nb,4) wxyz
-        jnt_pos = np.zeros((self.nbody, 3))
-        jnt_axis = np.zeros((self.nbody, 3))
-        qpos0 = np.zeros(self.nbody)
-        for i, l in enumerate(links):
-            if l.joint_type == mujoco.mjtJoint.mjJNT_HINGE:
-                j = int(model.body_jntadr[l.body_id])
-                jnt_pos[i] = model.jnt_pos[j]
-                jnt_axis[i] = model.jnt_axis[j]
-                qpos0[i] = model.qpos0[l.qpos_adr]
-        self.jnt_pos = t(jnt_pos)
-        self.jnt_axis = t(jnt_axis)
-        self.qpos0 = t(qpos0)
-        # Hinge bookkeeping in body order (skip root / fixed bodies).
-        self.hinge_body_idx = [i for i, l in enumerate(links) if l.joint_type == mujoco.mjtJoint.mjJNT_HINGE]
-        self.hinge_qpos_adr = torch.tensor([links[i].qpos_adr for i in self.hinge_body_idx], device=self.device)
-        self.hinge_dof_adr = torch.tensor([links[i].dof_adr for i in self.hinge_body_idx], device=self.device)
 
     def body_index(self, name: str) -> int:
         return self.body_names.index(name)
@@ -136,25 +131,35 @@ class G1Kinematics:
             p = l.parent_index
             pq = quat[p]
             pp = pos[p]
-            # Body frame from parent frame (fixed offset).
+            # Body frame from parent frame (fixed offset), then the body's joints in order.
             b_pos = pp + quat_apply(pq, self.body_pos[i].expand(*batch, 3))
             b_quat = quat_mul(pq, self.body_quat[i].expand(*batch, 4))
-            if l.joint_type == mujoco.mjtJoint.mjJNT_HINGE:
-                anchor = b_pos + quat_apply(b_quat, self.jnt_pos[i].expand(*batch, 3))
-                axis_w = quat_apply(b_quat, self.jnt_axis[i].expand(*batch, 3))
-                angle = qpos[..., l.qpos_adr] - self.qpos0[i]
-                q_loc = quat_from_angle_axis(angle, self.jnt_axis[i].expand(*batch, 3))
-                b_quat = quat_mul(b_quat, q_loc)
-                b_pos = anchor - quat_apply(b_quat, self.jnt_pos[i].expand(*batch, 3))
-                if compute_vel:
-                    qd = qvel[..., l.dof_adr].unsqueeze(-1)
-                    w_joint = axis_w * qd
-                    ang[i] = ang[p] + w_joint
-                    lin[i] = lin[p] + torch.cross(ang[p], b_pos - pp, dim=-1) + torch.cross(w_joint, b_pos - anchor, dim=-1)
-            else:  # fixed body
-                if compute_vel:
-                    ang[i] = ang[p]
-                    lin[i] = lin[p] + torch.cross(ang[p], b_pos - pp, dim=-1)
+            twists = []  # (angular rate, anchor) of hinges, linear rate of slides
+            for jt in l.joints:
+                axis_w = quat_apply(b_quat, jt.axis.expand(*batch, 3))
+                dq = qpos[..., jt.qpos_adr] - jt.qpos0
+                qd = qvel[..., jt.dof_adr].unsqueeze(-1) if compute_vel else None
+                if jt.joint_type == _HINGE:
+                    anchor = b_pos + quat_apply(b_quat, jt.pos.expand(*batch, 3))
+                    b_quat = quat_mul(b_quat, quat_from_angle_axis(dq, jt.axis.expand(*batch, 3)))
+                    b_pos = anchor - quat_apply(b_quat, jt.pos.expand(*batch, 3))
+                    if compute_vel:
+                        twists.append((axis_w * qd, anchor))
+                else:
+                    b_pos = b_pos + axis_w * dq.unsqueeze(-1)
+                    if compute_vel:
+                        twists.append((None, axis_w * qd))
+            if compute_vel:
+                w_b = ang[p]
+                v_b = lin[p] + torch.cross(ang[p], b_pos - pp, dim=-1)
+                for w_j, x in twists:
+                    if w_j is None:
+                        v_b = v_b + x
+                    else:
+                        w_b = w_b + w_j
+                        v_b = v_b + torch.cross(w_j, b_pos - x, dim=-1)
+                ang[i] = w_b
+                lin[i] = v_b
             pos[i] = b_pos
             quat[i] = b_quat
 

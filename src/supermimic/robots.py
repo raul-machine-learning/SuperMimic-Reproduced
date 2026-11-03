@@ -6,6 +6,9 @@
   6 follow through the URDF ``<mimic>`` couplings, kept as MuJoCo joint equalities. 53 hinges, 41 actuators.
 * ``g1_inspire_sweep``: ``g1_inspire`` with two free props (broom, dustpan) and a table in the scene, for the
   sweep clip with physical grasps; the hand collision geoms get sliding and torsional friction (condim 4).
+* ``capsule_hands``: two capsule hands built from the sweep mocap skeleton (scripts/assets/build_capsule_hands.py),
+  no robot body. The root ``rig`` is a free body welded to the world, so the floating-root state layout is kept;
+  each hand hangs from it through 3 world slides and 3 hinges, then 21 finger hinges. 54 joints, all actuated.
 
 The state, observation and goal layouts are sized by the number of hinge joints (``nj``) and of props, the
 action by the number of actuated joints (``na``). The active robot is fixed per process by the ``SM_ROBOT``
@@ -24,11 +27,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 import mujoco
+import numpy as np
 
 if TYPE_CHECKING:
     from mjlab.entity import EntityCfg
 
 ASSETS = Path(__file__).resolve().parent / "assets"
+SLIDE_SCALE = 0.2  # m per rad: hand travel is ~0.2x the joint angle range in the state / noise / loss scales
 
 G1_JOINT_NAMES: tuple[str, ...] = (
     "left_hip_pitch_joint",
@@ -141,10 +146,25 @@ class RobotSpec:
     nconmax: int
     njmax: int
     props: tuple[str, ...] = ()  # free rigid props simulated with the robot (supermimic.envs.props)
+    com_body: str = "torso_link"  # body whose COM is randomised (xi's COM offset)
+    contact_friction_range: tuple[float, float] = (0.3, 1.2)  # randomised friction of the foot_geom_regex geoms
+    # "root": root height / tilt against the reference (the paper's); "wrists": wrist position / orientation error,
+    # read from the wrist joints. Thresholds in that order (m, unitless tilt) or (m, rad).
+    termination: str = "root"
+    termination_thresholds: tuple[float, float] = (0.25, 0.8)
+    wrist_joints: tuple[tuple[str, ...], ...] = ()  # per hand: slides x, y, z (world), hinges y, x, z (intrinsic)
+    fixed_root: bool = False  # root welded to the world: no root reset noise, all env origins at the world origin
+    reward_overrides: tuple[tuple[str, float], ...] = ()  # TrackingRewardCfg field -> value
+    slide_joint_names: tuple[str, ...] = ()  # in metres: scaled by SLIDE_SCALE wherever joints share one scale
 
     @property
     def nj(self) -> int:
         return len(self.joint_names)
+
+    @property
+    def joint_scale(self) -> tuple[float, ...]:
+        """Per joint, the size of 1 rad in its own unit (SLIDE_SCALE m for slides)."""
+        return tuple(SLIDE_SCALE if j in self.slide_joint_names else 1.0 for j in self.joint_names)
 
     @property
     def na(self) -> int:
@@ -329,6 +349,91 @@ def _inspire_sweep_entity_cfg() -> EntityCfg:
     return cfg
 
 
+# ----------------------------------------------------------------------------- capsule hands
+
+CAPSULE_RIG_XML = ASSETS / "capsule_hands/capsule_rig.xml"
+
+
+def _xml_joint_names(path: Path) -> tuple[str, ...]:
+    """Non-free joints in document order (= MuJoCo's depth-first order)."""
+    import xml.etree.ElementTree as ET
+
+    return tuple(j.get("name") for j in ET.parse(path).getroot().iter("joint") if j.get("type") != "free")
+
+
+CAPSULE_JOINT_NAMES = _xml_joint_names(CAPSULE_RIG_XML) if CAPSULE_RIG_XML.exists() else ()
+CAPSULE_WRIST_JOINTS = tuple(tuple(f"{s}_wrist_{a}" for a in ("x", "y", "z", "ry", "rx", "rz")) for s in "LR")
+CAPSULE_SLIDES = tuple(j for w in CAPSULE_WRIST_JOINTS for j in w[:3])
+CAPSULE_FINGER_JOINTS = tuple(j for j in CAPSULE_JOINT_NAMES if "_wrist_" not in j)
+CAPSULE_DIGITS = ("thumb", "index", "middle", "ring", "pinky")
+CAPSULE_TRACKED_BODIES = ("rig",) + tuple(
+    b for s in "LR" for b in (f"{s}_hand", *(f"{s}_{d}{k}" for d in CAPSULE_DIGITS for k in (1, 3)))
+)
+CAPSULE_HAND_GEOMS = r"^[LR]_.*_collision$"
+CAPSULE_ROOT_MASS = 1000.0  # kg (gravity-compensated); inertia CAPSULE_ROOT_MASS kg m^2 about each axis
+# Position loops at 10 Hz, damping ratio 1, on each joint's inertia at the mean pose (hand mass + armature);
+# (inertia, effort limit) per joint group.
+CAPSULE_DRIVE = {
+    r"^[LR]_wrist_[xyz]$": (0.45, 60.0),
+    r"^[LR]_wrist_r[xyz]$": (5.0e-3, 10.0),
+    r"^[LR]_(index|middle|ring|pinky)1_flex$": (2.0e-3, 2.0),
+    r"^[LR]_(index|middle|ring|pinky)1_spread$": (2.0e-3, 1.0),
+    r"^[LR]_(index|middle|ring|pinky)2_flex$": (2.0e-3, 1.0),
+    r"^[LR]_(index|middle|ring|pinky)3_flex$": (2.0e-3, 0.5),
+    r"^[LR]_thumb1_(flex|spread)$": (2.0e-3, 2.0),
+    r"^[LR]_thumb2_flex$": (2.0e-3, 1.5),
+    r"^[LR]_thumb2_spread$": (2.0e-3, 1.0),
+    r"^[LR]_thumb3_flex$": (2.0e-3, 0.8),
+}
+CAPSULE_ACTION_SCALE = {r"^[LR]_wrist_[xyz]$": 0.1, r"^[LR]_wrist_r[xyz]$": 0.5, r"^[LR]_(?!wrist_).*$": 0.5}
+
+
+def _capsule_rig_spec() -> mujoco.MjSpec:
+    spec = mujoco.MjSpec.from_file(str(CAPSULE_RIG_XML))
+    # MjSpec.to_xml drops explicit inertials: restore those of the geometry-free bodies (root, wrist chain). The
+    # root is heavy so that the wrist drives' reactions do not move it against the (soft) weld.
+    for b in spec.bodies:
+        if b.name and not b.geoms:
+            b.explicitinertial = True
+            b.mass, b.inertia = (CAPSULE_ROOT_MASS, [CAPSULE_ROOT_MASS] * 3) if b.name == "rig" else (1e-3, [1e-7] * 3)
+    weld = spec.equality("rig_weld")
+    weld.data = [0.0] * 3 + [0.0] * 3 + [1.0, 0.0, 0.0, 0.0] + [1.0]  # anchor, relpose pos, relpose quat, torquescale
+    return spec
+
+
+@cache
+def _capsule_default_joint_pos() -> dict[str, float]:
+    """Wrists at the clip's mean pose (0); fingers at 0 moved 10 % inside their range."""
+    m = _capsule_rig_spec().compile()
+    out = {}
+    for j in CAPSULE_JOINT_NAMES:
+        lo, hi = m.joint(j).range
+        out[j] = float(np.clip(0.0, lo + 0.1 * (hi - lo), hi - 0.1 * (hi - lo)))
+    return out
+
+
+def _capsule_entity_cfg() -> EntityCfg:
+    import math
+
+    from mjlab.actuator import BuiltinPositionActuatorCfg
+    from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
+
+    wn = 10 * 2.0 * math.pi
+    drives = tuple(
+        BuiltinPositionActuatorCfg(target_names_expr=(expr,), stiffness=inertia * wn**2, damping=2.0 * inertia * wn, effort_limit=effort)
+        for expr, (inertia, effort) in CAPSULE_DRIVE.items()
+    )
+    return EntityCfg(
+        init_state=EntityCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0), joint_pos=_capsule_default_joint_pos(), joint_vel={".*": 0.0}),
+        spec_fn=_capsule_rig_spec,
+        articulation=EntityArticulationInfoCfg(actuators=drives, soft_joint_pos_limit_factor=0.9),
+    )
+
+
+def _capsule_action_scale() -> dict[str, float]:
+    return dict(CAPSULE_ACTION_SCALE)
+
+
 # ----------------------------------------------------------------------------- registry
 
 _G1_FEET = r"^(left|right)_foot[1-7]_collision$"
@@ -385,6 +490,31 @@ ROBOTS: dict[str, RobotSpec] = {
         nconmax=200,
         njmax=1200,
         props=("broom", "dustpan"),
+    ),
+    "capsule_hands": RobotSpec(
+        name="capsule_hands",
+        joint_names=CAPSULE_JOINT_NAMES,
+        actuated_joint_names=CAPSULE_JOINT_NAMES,
+        tracked_bodies=CAPSULE_TRACKED_BODIES,
+        anchor_body="rig",
+        root_body="rig",
+        foot_geom_regex=CAPSULE_HAND_GEOMS,
+        limit_joint_names=CAPSULE_JOINT_NAMES,
+        hand_joint_names=CAPSULE_FINGER_JOINTS,
+        mimic=(),
+        entity_cfg_fn=_capsule_entity_cfg,
+        action_scale_fn=_capsule_action_scale,
+        spec_fn=_capsule_rig_spec,
+        nconmax=64,
+        njmax=300,
+        com_body="rig",
+        contact_friction_range=(0.7, 1.2),
+        termination="wrists",
+        termination_thresholds=(0.10, 0.8),
+        wrist_joints=CAPSULE_WRIST_JOINTS,
+        fixed_root=True,
+        reward_overrides=(("std_body_pos", 0.05), ("std_body_lin_vel", 0.5)),
+        slide_joint_names=CAPSULE_SLIDES,
     ),
 }
 

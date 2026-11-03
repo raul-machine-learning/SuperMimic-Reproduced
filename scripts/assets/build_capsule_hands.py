@@ -57,6 +57,9 @@ EFFORT = {"flex1": 2.0, "spread1": 1.0, "flex2": 1.0, "flex3": 0.5, "thumb_flex1
           "thumb_flex2": 1.5, "thumb_spread2": 1.0, "thumb_flex3": 0.8}
 ARMATURE = 2.0e-3
 WRIST_ARMATURE = {"slide": 0.05, "hinge": 2.0e-3}
+# Wrist joint ranges: the clip's range plus these margins (m, rad); the middle Euler angle stays off gimbal lock.
+WRIST_RANGE_MARGIN = {"slide": 0.15, "hinge": 0.6}
+WRIST_RX_LIMIT = 1.45
 RIG_ASSET = ROOT / "src/supermimic/assets/capsule_hands/capsule_rig.xml"
 SKIN = [0.87, 0.72, 0.62, 1.0]
 SKIN_R = [0.80, 0.66, 0.58, 1.0]
@@ -292,10 +295,6 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
     for k, S in enumerate(SIDES):
         r = Rotation.from_quat(base_quat[:, k], scalar_first=True)
         rig_pose[S] = (base_pos[:, k].mean(0), r.mean().as_quat(scalar_first=True))
-    rig_spec, _, _ = make_spec(human, flips, rig_pose)
-    rig_model = rig_spec.compile()
-    rig_asset.write_text(rig_spec.to_xml())
-    rig_names = [rig_model.joint(i).name for i in range(1, rig_model.njnt)]
     wrist = {}
     for k, S in enumerate(SIDES):
         p0, q0 = rig_pose[S]
@@ -307,6 +306,19 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
             wrist[f"{S}_wrist_{n}"] = base_pos[:, k, i] - p0[i]
         for i, n in enumerate(("ry", "rx", "rz")):
             wrist[f"{S}_wrist_{n}"] = ang[:, i]
+    rig_spec, _, _ = make_spec(human, flips, rig_pose)
+    for n, q in wrist.items():
+        j = rig_spec.joint(n)
+        if n[-2] == "r":
+            lo, hi = max(q.min() - WRIST_RANGE_MARGIN["hinge"], -np.pi), min(q.max() + WRIST_RANGE_MARGIN["hinge"], np.pi)
+            if n.endswith("rx"):
+                lo, hi = max(lo, -WRIST_RX_LIMIT), min(hi, WRIST_RX_LIMIT)
+        else:
+            lo, hi = q.min() - WRIST_RANGE_MARGIN["slide"], q.max() + WRIST_RANGE_MARGIN["slide"]
+        j.limited, j.range = mujoco.mjtLimited.mjLIMITED_TRUE, [lo, hi]
+    rig_model = rig_spec.compile()
+    rig_asset.write_text(rig_spec.to_xml())
+    rig_names = [rig_model.joint(i).name for i in range(1, rig_model.njnt)]
     rig_joint_pos = np.stack([wrist[n] if n in wrist else joint_angles[n] for n in rig_names], 1)
     rig_data = mujoco.MjData(rig_model)
     rig_data.qpos[3] = 1.0

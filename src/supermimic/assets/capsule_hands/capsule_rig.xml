@@ -5,17 +5,17 @@
     <body name="rig" gravcomp="1">
       <joint name="rig_root" type="free"/>
       <body name="L_wrist_x" pos="0.245122 -0.811667 1.01142" gravcomp="1">
-        <joint name="L_wrist_x" type="slide" armature="0.05" axis="1 0 0"/>
+        <joint name="L_wrist_x" type="slide" range="-0.231705 0.347055" armature="0.05" axis="1 0 0" limited="true"/>
         <body name="L_wrist_y" gravcomp="1">
-          <joint name="L_wrist_y" type="slide" armature="0.05" axis="0 1 0"/>
+          <joint name="L_wrist_y" type="slide" range="-0.197958 0.292947" armature="0.05" axis="0 1 0" limited="true"/>
           <body name="L_wrist_z" gravcomp="1">
-            <joint name="L_wrist_z" type="slide" armature="0.05"/>
+            <joint name="L_wrist_z" type="slide" range="-0.32379 0.246555" armature="0.05" limited="true"/>
             <body name="L_wrist_ry" quat="-0.499343 -0.321358 0.344185 0.727271" gravcomp="1">
-              <joint name="L_wrist_ry" armature="0.002" axis="0 1 0"/>
+              <joint name="L_wrist_ry" range="-0.840801 1.53876" armature="0.002" axis="0 1 0" limited="true"/>
               <body name="L_wrist_rx" gravcomp="1">
-                <joint name="L_wrist_rx" armature="0.002" axis="1 0 0"/>
+                <joint name="L_wrist_rx" range="-0.873392 0.759858" armature="0.002" axis="1 0 0" limited="true"/>
                 <body name="L_hand" gravcomp="1">
-                  <joint name="L_wrist_rz" armature="0.002"/>
+                  <joint name="L_wrist_rz" range="-1.6498 0.872048" armature="0.002" limited="true"/>
                   <geom name="L_heel_collision" size="0.012 0.0239259" pos="0.014996 0.0014161 0.000360812" quat="0.998573 0.0365944 0.0388859 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
                   <geom name="L_thenar_collision" size="0.013 0.0203892" pos="0.0338704 -0.00599068 0.0338532" quat="0.511913 -0.271051 -0.815155 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
                   <geom name="L_index_wrist_collision" size="0.012 0.0194882" pos="0.0362887 0.000814493 0.0232722" quat="0.72286 0.0407105 -0.689794 0" type="capsule" condim="4" rgba="0.87 0.72 0.62 1"/>
@@ -113,17 +113,17 @@
         </body>
       </body>
       <body name="R_wrist_x" pos="-0.190711 -0.772576 1.03214" gravcomp="1">
-        <joint name="R_wrist_x" type="slide" armature="0.05" axis="1 0 0"/>
+        <joint name="R_wrist_x" type="slide" range="-0.268282 0.222049" armature="0.05" axis="1 0 0" limited="true"/>
         <body name="R_wrist_y" gravcomp="1">
-          <joint name="R_wrist_y" type="slide" armature="0.05" axis="0 1 0"/>
+          <joint name="R_wrist_y" type="slide" range="-0.423597 0.414064" armature="0.05" axis="0 1 0" limited="true"/>
           <body name="R_wrist_z" gravcomp="1">
-            <joint name="R_wrist_z" type="slide" armature="0.05"/>
+            <joint name="R_wrist_z" type="slide" range="-0.342979 0.324951" armature="0.05" limited="true"/>
             <body name="R_wrist_ry" quat="-0.698125 -0.395536 -0.307554 -0.511452" gravcomp="1">
-              <joint name="R_wrist_ry" armature="0.002" axis="0 1 0"/>
+              <joint name="R_wrist_ry" range="-1.82047 1.48438" armature="0.002" axis="0 1 0" limited="true"/>
               <body name="R_wrist_rx" gravcomp="1">
-                <joint name="R_wrist_rx" armature="0.002" axis="1 0 0"/>
+                <joint name="R_wrist_rx" range="-0.936411 1.44637" armature="0.002" axis="1 0 0" limited="true"/>
                 <body name="R_hand" gravcomp="1">
-                  <joint name="R_wrist_rz" armature="0.002"/>
+                  <joint name="R_wrist_rz" range="-0.959875 1.51904" armature="0.002" limited="true"/>
                   <geom name="R_heel_collision" size="0.012 0.0248049" pos="-0.014976 0.00095346 0.000672472" quat="0.998269 0.0582437 -0.00814286 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
                   <geom name="R_thenar_collision" size="0.013 0.0214109" pos="-0.033458 -0.00828443 0.0348567" quat="0.526273 -0.281923 0.802219 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>
                   <geom name="R_index_wrist_collision" size="0.012 0.0187288" pos="-0.0341058 -0.00171913 0.0251071" quat="0.710848 0.00795714 0.7033 0" type="capsule" condim="4" rgba="0.8 0.66 0.58 1"/>

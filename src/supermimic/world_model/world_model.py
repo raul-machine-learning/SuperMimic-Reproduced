@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from supermimic.robots import ROBOT
 from supermimic.world_model.dynamics import MLP, DynamicsMLP
 from supermimic.world_model.heads import AnalyticHeads, ReferenceFrame
 from supermimic.world_model.state_spec import StateSpec, StateSpecCfg
@@ -19,8 +20,9 @@ class WorldModelCfg:
     term_hidden: tuple[int, ...] = (64, 64)
     state_spec: StateSpecCfg = field(default_factory=StateSpecCfg)
     term_loss_weight: float = 1.0
-    height_threshold: float = 0.25
-    tilt_threshold: float = 0.8
+    # Scales of the two termination features (AnalyticHeads.termination_features).
+    height_threshold: float = ROBOT.termination_thresholds[0]
+    tilt_threshold: float = ROBOT.termination_thresholds[1]
 
 
 class TerminationHead(nn.Module):
@@ -32,7 +34,7 @@ class TerminationHead(nn.Module):
         self.register_buffer("scale", torch.tensor([1.0 / height_thr, 1.0 / tilt_thr]))
 
     def forward(self, feats: torch.Tensor) -> torch.Tensor:
-        """feats (…, 2) = [height error, tilt error] -> logits (…,)"""
+        """feats (…, 2) (e.g. [height error, tilt error]) -> logits (…,)"""
         x = feats * self.scale
         return self.mlp(torch.cat([x, x.abs()], dim=-1)).squeeze(-1)
 
@@ -56,17 +58,17 @@ class WorldModel(nn.Module):
         return self.spec.integrate(s, delta)
 
     def termination_logits(self, s_next: torch.Tensor, ref: ReferenceFrame) -> torch.Tensor:
-        # The pelvis is the free-joint body, so its pose is the state's root pose: no FK needed.
-        feats = self.heads.termination_features(s_next[..., 0:3], s_next[..., 3:7], ref)
+        # Termination features read the root pose or the wrist joints straight from the state: no FK needed.
+        feats = self.heads.termination_features(s_next, ref)
         return self.term_head(feats)
 
     # ------------------------------------------------------------------ Eq. 1
 
-    def _loss_step(self, s, a, xi, s_true, done, ref_root_pos, ref_root_quat):
+    def _loss_step(self, s, a, xi, s_true, done, ref_root_pos, ref_root_quat, ref_joint_pos):
         """One autoregressive step of Eq. 1: returns (s_next, sq_err (n,70), term_bce (n,), logits (n,))."""
         s_next = self.step(s, a, xi)
         e = self.spec.error_vector(s_next, s_true)
-        feats = self.heads.termination_features(s_next[..., 0:3], s_next[..., 3:7], ReferenceFrame(None, None, None, None, ref_root_pos, ref_root_quat))
+        feats = self.heads.termination_features(s_next, ReferenceFrame(None, None, None, None, ref_root_pos, ref_root_quat, ref_joint_pos))
         logits = self.term_head(feats)
         bce = F.binary_cross_entropy_with_logits(logits, done, reduction="none")
         return s_next, e * e, bce, logits
@@ -91,7 +93,7 @@ class WorldModel(nn.Module):
         acc_num = 0.0
         step_fn = getattr(self, "_loss_step_fn", None) or self._loss_step
         for j in range(k):
-            s, sq, bce, logits = step_fn(s, a_exec[j], xi, states[j + 1], done[j], refs[j].root_pos_w, refs[j].root_quat_w)
+            s, sq, bce, logits = step_fn(s, a_exec[j], xi, states[j + 1], done[j], refs[j].root_pos_w, refs[j].root_quat_w, refs[j].joint_pos)
             total_state = total_state + sq.sum(-1).mean()
             total_term = total_term + bce.mean()
             with torch.no_grad():

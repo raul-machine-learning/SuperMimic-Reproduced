@@ -55,6 +55,7 @@ class MultiClipMotionCommand(CommandTerm):
         self._mimic_follower = torch.tensor(ROBOT.joint_indices(tuple(m[0] for m in ROBOT.mimic)), dtype=torch.long, device=self.device)
         self._mimic_driver = torch.tensor(ROBOT.joint_indices(tuple(m[1] for m in ROBOT.mimic)), dtype=torch.long, device=self.device)
         self._mimic_mult = torch.tensor([m[2] for m in ROBOT.mimic], device=self.device)
+        self._joint_scale = torch.tensor(ROBOT.joint_scale, device=self.device)
 
         default_joint_pos = self.robot.data.default_joint_pos[0].detach()
         self.library = MotionLibrary(
@@ -365,7 +366,7 @@ class MultiClipMotionCommand(CommandTerm):
         root_ang_vel = root_ang_vel + rs[:, 3:]
         lo, hi = self.cfg.joint_position_range
         if hi > lo:
-            joint_pos = joint_pos + sample_uniform(lo, hi, joint_pos.shape, device=self.device)
+            joint_pos = joint_pos + sample_uniform(lo, hi, joint_pos.shape, device=self.device) * self._joint_scale
 
         self._write_reference_state_to_sim(env_ids, root_pos, root_ori, root_lin_vel, root_ang_vel, joint_pos, joint_vel)
         self._write_props_to_sim(env_ids, self.frame[env_ids])
@@ -451,7 +452,7 @@ class MultiClipMotionCommand(CommandTerm):
 class MultiClipMotionCommandCfg(CommandTermCfg):
     npz_files: list[str]
     anchor_body_name: str
-    root_body_name: str = "pelvis"
+    root_body_name: str = ROBOT.root_body
     body_names: tuple[str, ...]
     entity_name: str = "robot"
     future_frames: int = 10

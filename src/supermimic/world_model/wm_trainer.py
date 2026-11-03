@@ -44,9 +44,10 @@ class WorldModelTrainer:
 
     def loss_on(self, w: WindowBatch):
         k, n = w.frame.shape
-        # Only the root pose of the references is needed for the termination features.
+        # Only the root pose and joints of the references are needed for the termination features.
         r = self.lib.ref(w.frame.reshape(-1))
-        refs = [ReferenceFrame(None, None, None, None, r.root_pos_w[j * n : (j + 1) * n], r.root_quat_w[j * n : (j + 1) * n]) for j in range(k)]
+        sl = [slice(j * n, (j + 1) * n) for j in range(k)]
+        refs = [ReferenceFrame(None, None, None, None, r.root_pos_w[s], r.root_quat_w[s], r.joint_pos[s]) for s in sl]
         return self.wm.window_loss(w.states, w.a_exec, w.xi, w.done, refs)
 
     def update(self, buffer: ReplayBuffer) -> dict[str, float]:

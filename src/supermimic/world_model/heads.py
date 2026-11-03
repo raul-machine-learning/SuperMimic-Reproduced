@@ -143,23 +143,38 @@ class AnalyticHeads:
         )
 
     @staticmethod
-    def termination_features(root_pos: torch.Tensor, root_quat: torch.Tensor, ref: ReferenceFrame) -> torch.Tensor:
-        """[height error, tilt error] (N, 2) — the quantities the paper thresholds (0.25 m, 0.8)."""
+    def termination_features(s: torch.Tensor, ref: ReferenceFrame) -> torch.Tensor:
+        """(N, 2), the quantities thresholded by ``ROBOT.termination_thresholds``.
+
+        * ``root``: [height error, tilt error] of the free-joint root (the paper's 0.25 m, 0.8); needs ``ref.root_*``.
+        * ``wrists``: [largest wrist position error (m), largest wrist orientation error (rad)]; needs ``ref.joint_pos``.
+        """
+        if ROBOT.termination == "wrists":
+            from supermimic.kinematics.wrists import wrist_errors, wrist_joint_index
+
+            pos, ang = wrist_errors(split_state(s)[2], ref.joint_pos, wrist_joint_index(s.device))
+            return torch.stack([pos.amax(-1), ang.amax(-1)], dim=-1)
+        root_pos, root_quat = s[..., 0:3], s[..., 3:7]
         g = torch.tensor([0.0, 0.0, -1.0], dtype=root_quat.dtype, device=root_quat.device).expand(root_quat.shape[:-1] + (3,))
         tilt = quat_apply_inverse(ref.root_quat_w, g)[..., 2] - quat_apply_inverse(root_quat, g)[..., 2]
         height = ref.root_pos_w[..., 2] - root_pos[..., 2]
         return torch.stack([height, tilt], dim=-1)
 
-    def terminated(self, s: torch.Tensor, ref: ReferenceFrame, height_thr: float = 0.25, tilt_thr: float = 0.8) -> torch.Tensor:
-        f = self.termination_features(s[..., 0:3], s[..., 3:7], ref)  # pelvis == free-joint root
-        return (f[..., 0].abs() > height_thr) | (f[..., 1].abs() > tilt_thr)
+    def terminated(self, s: torch.Tensor, ref: ReferenceFrame, thresholds: tuple[float, float] = ROBOT.termination_thresholds) -> torch.Tensor:
+        f = self.termination_features(s, ref)
+        return (f[..., 0].abs() > thresholds[0]) | (f[..., 1].abs() > thresholds[1])
 
     @staticmethod
     def root_error_features(s: torch.Tensor, ref: ReferenceFrame) -> torch.Tensor:
-        """Critic-only privileged drift features (plan D10): root position error in the reference
-        heading frame (3) and yaw error (1). (N, 4)"""
+        """Critic-only privileged drift features (plan D10), (N, 4): root position error in the reference
+        heading frame (3) and yaw error (1); for ``wrists`` termination, each wrist's position and orientation error."""
         from supermimic.kinematics.rotations import heading_yaw, quat_apply_inverse, wrap_to_pi, yaw_quat
 
+        if ROBOT.termination == "wrists":
+            from supermimic.kinematics.wrists import wrist_errors, wrist_joint_index
+
+            pos, ang = wrist_errors(split_state(s)[2], ref.joint_pos, wrist_joint_index(s.device))
+            return torch.stack([pos, ang], dim=-1).flatten(-2)
         dp = quat_apply_inverse(yaw_quat(ref.root_quat_w), s[..., 0:3] - ref.root_pos_w)
         dyaw = wrap_to_pi(heading_yaw(s[..., 3:7]) - heading_yaw(ref.root_quat_w))
         return torch.cat([dp, dyaw[..., None]], dim=-1)

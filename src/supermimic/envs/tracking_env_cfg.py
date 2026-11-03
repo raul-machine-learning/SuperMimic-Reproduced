@@ -68,8 +68,9 @@ class SuperMimicEnvCfgArgs:
     replay_capacity: int = 1000
     record_transitions: bool = True
     seed: int | None = 0
-    root_height_threshold: float = 0.25
-    root_tilt_threshold: float = 0.8
+    # The two termination thresholds (ROBOT.termination): root height / tilt, or wrist position / orientation.
+    root_height_threshold: float = ROBOT.termination_thresholds[0]
+    root_tilt_threshold: float = ROBOT.termination_thresholds[1]
     joint_limit_weight: float = -2.0
     bin_frames: int = 50
     compact_library: bool = False
@@ -127,6 +128,8 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
     # ---------------------------------------------------------------- commands
     pose_range = {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.01, 0.01), "roll": (-0.1, 0.1), "pitch": (-0.1, 0.1), "yaw": (-0.2, 0.2)}
     vel_range = {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "z": (-0.2, 0.2), "roll": (-0.52, 0.52), "pitch": (-0.52, 0.52), "yaw": (-0.78, 0.78)}
+    if ROBOT.fixed_root:
+        pose_range, vel_range = {}, {}
     commands = {
         "motion": MultiClipMotionCommandCfg(
             npz_files=[str(f) for f in a.npz_files],
@@ -153,7 +156,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
             mode="startup",
             func=dr.body_com_offset,
             params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("torso_link",)),
+                "asset_cfg": SceneEntityCfg("robot", body_names=(ROBOT.com_body,)),
                 "operation": "add",
                 "ranges": {0: (-0.025, 0.025), 1: (-0.05, 0.05), 2: (-0.05, 0.05)},
             },
@@ -169,7 +172,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
             params={
                 "asset_cfg": SceneEntityCfg("robot", geom_names=FOOT_GEOM_REGEX),
                 "operation": "abs",
-                "ranges": (0.3, 1.2),
+                "ranges": ROBOT.contact_friction_range,
                 "shared_random": True,
             },
         )
@@ -189,18 +192,18 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
     # ---------------------------------------------------------------- rewards (Table A.2)
     # Fingers rest against their limits (open / closed hand), so only the body joints are penalised there.
     limit_joints = (".*",) if ROBOT.limit_joint_names == ROBOT.joint_names else ROBOT.limit_joint_names
+    rc = TrackingRewardCfg()
     rewards = {
-        "motion_global_root_pos": RewardTermCfg(func=track_mdp.motion_global_anchor_position_error_exp, weight=0.5, params={"command_name": "motion", "std": 0.3}),
-        "motion_global_root_ori": RewardTermCfg(func=track_mdp.motion_global_anchor_orientation_error_exp, weight=0.5, params={"command_name": "motion", "std": 0.4}),
-        "motion_body_pos": RewardTermCfg(func=track_mdp.motion_relative_body_position_error_exp, weight=1.0, params={"command_name": "motion", "std": 0.3}),
-        "motion_body_ori": RewardTermCfg(func=track_mdp.motion_relative_body_orientation_error_exp, weight=1.0, params={"command_name": "motion", "std": 0.4}),
-        "motion_body_lin_vel": RewardTermCfg(func=track_mdp.motion_global_body_linear_velocity_error_exp, weight=1.0, params={"command_name": "motion", "std": 1.0}),
-        "motion_body_ang_vel": RewardTermCfg(func=track_mdp.motion_global_body_angular_velocity_error_exp, weight=1.0, params={"command_name": "motion", "std": 3.14}),
-        "action_rate_l2": RewardTermCfg(func=base_mdp.action_rate_l2, weight=-0.1),
+        "motion_global_root_pos": RewardTermCfg(func=track_mdp.motion_global_anchor_position_error_exp, weight=rc.w_root_pos, params={"command_name": "motion", "std": rc.std_root_pos}),
+        "motion_global_root_ori": RewardTermCfg(func=track_mdp.motion_global_anchor_orientation_error_exp, weight=rc.w_root_ori, params={"command_name": "motion", "std": rc.std_root_ori}),
+        "motion_body_pos": RewardTermCfg(func=track_mdp.motion_relative_body_position_error_exp, weight=rc.w_body_pos, params={"command_name": "motion", "std": rc.std_body_pos}),
+        "motion_body_ori": RewardTermCfg(func=track_mdp.motion_relative_body_orientation_error_exp, weight=rc.w_body_ori, params={"command_name": "motion", "std": rc.std_body_ori}),
+        "motion_body_lin_vel": RewardTermCfg(func=track_mdp.motion_global_body_linear_velocity_error_exp, weight=rc.w_body_lin_vel, params={"command_name": "motion", "std": rc.std_body_lin_vel}),
+        "motion_body_ang_vel": RewardTermCfg(func=track_mdp.motion_global_body_angular_velocity_error_exp, weight=rc.w_body_ang_vel, params={"command_name": "motion", "std": rc.std_body_ang_vel}),
+        "action_rate_l2": RewardTermCfg(func=base_mdp.action_rate_l2, weight=rc.w_action_rate),
         "joint_limit": RewardTermCfg(func=base_mdp.joint_pos_limits, weight=a.joint_limit_weight, params={"asset_cfg": SceneEntityCfg("robot", joint_names=limit_joints)}),
     }
     if ROBOT.hand_joint_names:
-        rc = TrackingRewardCfg()
         rewards["motion_hand_joint_pos"] = RewardTermCfg(
             func=motion_hand_joint_position_error_exp, weight=rc.w_hand_joint_pos,
             params={"command_name": "motion", "std": rc.std_hand_joint_pos, "joint_ids": ROBOT.joint_indices(ROBOT.hand_joint_names)},
@@ -210,16 +213,21 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
     terminations = {
         "time_out": TerminationTermCfg(func=base_mdp.time_out, time_out=True),
         "clip_end": TerminationTermCfg(func=sm_term.clip_end, params={"command_name": "motion"}, time_out=True),
-        "root_height": TerminationTermCfg(func=sm_term.bad_root_height, params={"command_name": "motion", "threshold": a.root_height_threshold}),
-        "root_tilt": TerminationTermCfg(func=sm_term.bad_root_tilt, params={"command_name": "motion", "threshold": a.root_tilt_threshold}),
     }
+    if ROBOT.termination == "wrists":
+        terminations["wrist_pos"] = TerminationTermCfg(func=sm_term.bad_wrist_pos, params={"command_name": "motion", "threshold": a.root_height_threshold})
+        terminations["wrist_ori"] = TerminationTermCfg(func=sm_term.bad_wrist_ori, params={"command_name": "motion", "threshold": a.root_tilt_threshold})
+    else:
+        terminations["root_height"] = TerminationTermCfg(func=sm_term.bad_root_height, params={"command_name": "motion", "threshold": a.root_height_threshold})
+        terminations["root_tilt"] = TerminationTermCfg(func=sm_term.bad_root_tilt, params={"command_name": "motion", "threshold": a.root_tilt_threshold})
 
     recorders = {}
     if a.record_transitions:
-        recorders["replay"] = ReplayRecorderCfg(params={"capacity": a.replay_capacity, "foot_geom_regex": FOOT_GEOM_REGEX, "com_body_name": "torso_link"})
+        recorders["replay"] = ReplayRecorderCfg(params={"capacity": a.replay_capacity, "foot_geom_regex": FOOT_GEOM_REGEX, "com_body_name": ROBOT.com_body})
 
     cfg = ManagerBasedRlEnvCfg(
-        scene=SceneCfg(terrain=TerrainEntityCfg(terrain_type="plane"), num_envs=a.num_envs, entities={"robot": ROBOT.entity_cfg_fn()}),
+        scene=SceneCfg(terrain=TerrainEntityCfg(terrain_type="plane"), num_envs=a.num_envs, entities={"robot": ROBOT.entity_cfg_fn()},
+                       env_spacing=0.0 if ROBOT.fixed_root else 2.0),
         observations=observations,
         actions=actions,
         commands=commands,
@@ -227,7 +235,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         rewards=rewards,
         terminations=terminations,
         recorders=recorders,
-        viewer=ViewerConfig(origin_type=ViewerConfig.OriginType.ASSET_BODY, entity_name="robot", body_name="torso_link", distance=2.8, fovy=55.0, elevation=-5.0, azimuth=120.0),
+        viewer=ViewerConfig(origin_type=ViewerConfig.OriginType.ASSET_BODY, entity_name="robot", body_name=ROBOT.anchor_body, distance=2.8, fovy=55.0, elevation=-5.0, azimuth=120.0),
         sim=QuietSimulationCfg(nconmax=ROBOT.nconmax, njmax=ROBOT.njmax, mujoco=MujocoCfg(timestep=0.005, iterations=10, ls_iterations=20)),
         decimation=4,
         episode_length_s=a.episode_length_s,
