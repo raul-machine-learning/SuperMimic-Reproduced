@@ -3,6 +3,8 @@ simulation, translucent blue ghost = reference motion. Writes one mp4 per clip a
 highlight; GIF conversion is left to ffmpeg (see README).
 
   MUJOCO_GL=glfw uv run python scripts/media/render_rollout.py media/rollouts.npz media/out --fps 25 --seconds 6
+
+Renders the active robot (``SM_ROBOT``), which must be the one the rollout was recorded with.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 os.environ.setdefault("MUJOCO_GL", "glfw")
@@ -20,7 +23,29 @@ from PIL import Image, ImageDraw, ImageFont
 
 from mjlab.asset_zoo.robots.unitree_g1.g1_constants import G1_XML
 
+from supermimic.robots import ASSETS, ROBOT
+
 GHOST_RGBA = "0.25 0.50 1.0 0.22"
+
+
+def robot_mjcf() -> Path:
+    """MJCF file of the active robot with absolute mesh paths (the G1's own file for the plain G1)."""
+    if ROBOT.name == "g1":
+        return Path(G1_XML)
+    spec = ROBOT.spec_fn()
+    g1_meshes = Path(spec.modelfiledir) / spec.meshdir
+    for m in spec.meshes:
+        for d in (g1_meshes, ASSETS / "inspire_hands/meshes"):
+            if (d / m.file).exists():
+                m.file = str((d / m.file).resolve())
+                break
+        else:
+            raise FileNotFoundError(m.file)
+    spec.meshdir = ""
+    out = Path(tempfile.mkdtemp()) / f"{ROBOT.name}.xml"
+    # MjSpec writes the attached hands' empty default classes as bare <default/>, which the parser rejects.
+    out.write_text(re.sub(r"\s*<default/>", "", spec.to_xml()))
+    return out
 
 
 def two_robot_xml(mjcf: Path, root_body: str) -> str:
@@ -31,7 +56,8 @@ def two_robot_xml(mjcf: Path, root_body: str) -> str:
     ghost = re.sub(r' name="([^"]+)"', r' name="ref_\1"', body)
     # keep only the visual mesh geoms of the ghost, visual-only and translucent
     ghost = re.sub(r"<geom\b[^>]*/>", lambda m: "" if "mesh=" not in m.group(0) else m.group(0), ghost)
-    ghost = re.sub(r' (contype|conaffinity|group|material|rgba|class)="[^"]*"', "", ghost)
+    ghost = re.sub(r"<geom\b[^>]*/>", lambda m: re.sub(r' (contype|conaffinity|group|material|rgba|class|type)="[^"]*"', "", m.group(0)), ghost)
+    ghost = re.sub(r' (class|childclass)="[^"]*"', "", ghost)
     ghost = ghost.replace("<geom ", f'<geom type="mesh" contype="0" conaffinity="0" group="1" rgba="{GHOST_RGBA}" ')
     ghost = re.sub(r"<site[^>]*/>", "", ghost)
     ghost = re.sub(r"<freejoint[^>]*/>", '<freejoint name="ref_root"/>', ghost, count=1)
@@ -78,10 +104,12 @@ def pretty(name: str) -> str:
 
 def main(traj: Path, out_dir: Path, fps: int = 25, seconds: float | None = None, width: int = 1280, height: int = 720,
          azimuth: float = 140.0, elevation: float = -14.0, distance: float = 2.7, ghost: bool = True, label: bool = True, clips: list[str] | None = None,
-         concat: Path | None = None, segments: list[str] | None = None, titles: list[str] | None = None) -> None:
-    """``segments``: per-clip time windows as ``name:start:end`` (seconds); ``titles``: ``name=Display title`` overrides."""
+         concat: Path | None = None, segments: list[str] | None = None, titles: list[str] | None = None, look_at: tuple[str, ...] = (),
+         suffix: str = "") -> None:
+    """``segments``: per-clip time windows as ``name:start:end`` (seconds); ``titles``: ``name=Display title`` overrides;
+    ``look_at``: robot bodies whose mean position the camera follows (default: the root, at a fixed height)."""
 
-    model = mujoco.MjModel.from_xml_string(two_robot_xml(Path(G1_XML), "pelvis"))
+    model = mujoco.MjModel.from_xml_string(two_robot_xml(robot_mjcf(), ROBOT.root_body))
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, height, width)
     opt = mujoco.MjvOption()
@@ -102,6 +130,7 @@ def main(traj: Path, out_dir: Path, fps: int = 25, seconds: float | None = None,
     names = [str(n) for n in d["names"]]
     nq_robot = d["robot_qpos"].shape[-1]
     assert model.nq == 2 * nq_robot, (model.nq, nq_robot)
+    look_ids = [model.body(b).id for b in look_at]
     out_dir.mkdir(parents=True, exist_ok=True)
     stride = max(1, int(round(50 / fps)))
     outputs = []
@@ -115,19 +144,20 @@ def main(traj: Path, out_dir: Path, fps: int = 25, seconds: float | None = None,
         a, b = int(t0 * 50), min(T, int(t1 * 50) + 1)
         qr, qf = d["robot_qpos"][i, a:b], d["ref_qpos"][i, a:b]
         T = b - a
-        out = out_dir / f"{name}.mp4"
+        out = out_dir / f"{name}{suffix}.mp4"
         ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
                                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
         # smooth camera: follow a low-passed root position
-        target = qr[0, :3].copy()
+        target = None
         for t in range(0, T, stride):
             data.qpos[:nq_robot] = qr[t]
             data.qpos[nq_robot:] = qf[t]
             if not ghost:
                 data.qpos[nq_robot:nq_robot + 3] = [0, 0, -5]
             mujoco.mj_forward(model, data)
-            target = 0.92 * target + 0.08 * qr[t, :3]
-            cam.lookat[:] = [target[0], target[1], 0.65]
+            focus = data.xpos[look_ids].mean(0) if look_ids else np.array([*qr[t, :2], 0.65])
+            target = focus if target is None else 0.92 * target + 0.08 * focus
+            cam.lookat[:] = target
             cam.distance, cam.azimuth, cam.elevation = distance, azimuth, elevation
             renderer.update_scene(data, cam, opt)
             img = renderer.render()
