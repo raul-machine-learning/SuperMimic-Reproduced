@@ -8,7 +8,8 @@ normalized action only when computing the executed set-point. ``executed_raw`` e
 With ``reference_offset`` (robots with ``ROBOT.residual_actions``) the set-point is the reference joint position of
 the next frame plus the scaled action, instead of the default pose plus the scaled action. ``executed_abs`` is
 the executed action in default-offset units, ``a + eps + (q_ref - q0) / scale``: the replay buffer stores it, so
-the world model sees the same action meaning either way.
+the world model sees the same action meaning either way. The reference set-point includes the grip assist
+(supermimic.envs.mdp.grip_assist).
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ from typing import TYPE_CHECKING
 
 import torch
 from mjlab.envs.mdp.actions import JointPositionAction, JointPositionActionCfg
+
+from supermimic.envs.mdp import grip_assist
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -42,11 +45,18 @@ class NoisyJointPositionAction(JointPositionAction):
         return self._executed_abs
 
     def _reference_target(self) -> torch.Tensor:
-        """(N, A) reference joint positions of the frame after the current one."""
+        """(N, A) reference joint positions of the frame after the current one (plus the grip assist)."""
         cmd = self._env.command_manager.get_term(self.cfg.command_name)
         lib = cmd.library
         nxt = torch.minimum(cmd.frame + 1, lib.last_frame_of(cmd.frame))
-        return lib.ref(nxt).joint_pos[:, self._target_ids]
+        target = lib.ref(nxt).joint_pos[:, self._target_ids]
+        if lib.grip_hold_early is not None:
+            if not hasattr(self, "_grip_mask"):
+                self._grip_mask = grip_assist.flex_mask(self.target_names, target.device)
+            extra = grip_assist.assist_offset(lib.grip_hold_early[nxt], self._grip_mask)
+            if extra is not None:
+                target = target + extra
+        return target
 
     def process_actions(self, actions: torch.Tensor):
         self._raw_actions[:] = actions

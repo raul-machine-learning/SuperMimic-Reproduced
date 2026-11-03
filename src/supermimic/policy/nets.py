@@ -26,8 +26,9 @@ class PolicyCfg:
     # Fixed per-term observation scales (divide): joint_pos, joint_vel, base_ang_vel, projected_gravity, actions
     # (and prop_pose with props).
     obs_term_scale: tuple[float, ...] = (1.0, 5.0, 2.0, 1.0, 1.0) + ((1.0,) if ROBOT.props else ())
-    # Fixed goal feature scales: joint_pos NJ, joint_vel NJ, grav 3, ang_vel_b 3, lin_vel_h 3, height 1 (and prop poses 9P).
-    goal_term_scale: tuple[float, ...] = (1.0, 5.0, 1.0, 2.0, 1.0, 1.0) + ((1.0,) if ROBOT.props else ())
+    # Fixed goal feature scales: joint_pos NJ, joint_vel NJ, grav 3, ang_vel_b 3, lin_vel_h 3, height 1 (and prop poses
+    # 9P, glove holding flags G).
+    goal_term_scale: tuple[float, ...] = (1.0, 5.0, 1.0, 2.0, 1.0, 1.0) + ((1.0,) if ROBOT.props else ()) + ((1.0,) if ROBOT.grip else ())
     decoder_last_gain: float = 0.01
     goal_dim: int = GOAL_DIM  # 680 for the G1 (+9 with anchor_obs)
 
@@ -45,7 +46,7 @@ def _obs_scale_vector(cfg: PolicyCfg) -> torch.Tensor:
 
 
 def _goal_scale_vector(cfg: PolicyCfg, goal_dim: int) -> torch.Tensor:
-    sizes = (ROBOT.nj, ROBOT.nj, 3, 3, 3, 1) + ((9 * ROBOT.num_props,) if ROBOT.props else ())
+    sizes = (ROBOT.nj, ROBOT.nj, 3, 3, 3, 1) + ((9 * ROBOT.num_props,) if ROBOT.props else ()) + ((len(ROBOT.grip),) if ROBOT.grip else ())
     per_frame = torch.cat([torch.full((n,), 1.0 / s) for n, s in zip(sizes, cfg.goal_term_scale)])
     k, extra = divmod(goal_dim, GOAL_FRAME_DIM)
     return torch.cat([per_frame.repeat(k), torch.ones(extra)])

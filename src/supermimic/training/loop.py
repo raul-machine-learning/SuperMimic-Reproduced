@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from supermimic.config import TrainConfig
 from supermimic.data.motion_convert import load_robot_model
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
+from supermimic.envs.mdp import grip_assist
 from supermimic.envs.mdp.motion_library import GOAL_FEAT_DIM, discover_npz
 from supermimic.envs.tracking_env_cfg import ANCHOR_BODY, ROOT_BODY, TRACKED_BODIES
 from supermimic.imagination.policy_trainer import PolicyTrainer
@@ -161,6 +162,7 @@ class Trainer:
         last_log = time.time()
 
         while self.iteration < sch.total_iterations:
+            grip_assist.set_level(grip_assist.scheduled_level(self.iteration, sch.grip_assist_hold_iterations, sch.grip_assist_decay_iterations))
             # ---------------- (1) collect one vectorised env step
             t0 = time.perf_counter()
             action = self.act(obs)
@@ -244,6 +246,8 @@ class Trainer:
                         self.writer.add_scalar(f"time/{k}_s_per_iter", v / sch.log_interval, it)
                     self.writer.add_scalar("time/hours", elapsed / 3600, it)
                     self.writer.add_scalar("time/updates", self.num_updates, it)
+                    if ROBOT.grip:
+                        self.writer.add_scalar("train/grip_assist", grip_assist.level(), it)
                     self.writer.add_scalar("sampler/entropy", float(self.command.metrics["sampling_entropy"][0]), it)
                     self.writer.add_scalar("sampler/bin_return_mean", float(self.command.bin_return.mean()), it)
                     dt_log = time.time() - last_log
@@ -254,6 +258,7 @@ class Trainer:
                         f"wm nse1 {agg.get('wm/nse_1step', float('nan'))/max(agg_n,1):.4f} nse8 {(float(err[-1]) if err is not None else float('nan')):.4f} | "
                         f"imag_ret {agg.get('policy/imag_return_undisc', float('nan'))/max(agg_n,1):.3f} surv {agg.get('policy/imag_survival_H', float('nan'))/max(agg_n,1):.3f} | "
                         f"t sim/wm/pi {timers['sim']:.1f}/{timers['wm']:.1f}/{timers['policy']:.1f}s"
+                        + (f" | grip assist {grip_assist.level():.2f} rad" if ROBOT.grip else "")
                     )
                     print(msg, flush=True)
                 agg, agg_n = {}, 0

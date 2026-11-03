@@ -164,6 +164,10 @@ class RobotSpec:
     # Joint set-points are the next reference frame's joint positions plus the scaled action (instead of the
     # default pose plus the scaled action; supermimic.envs.actions).
     residual_actions: bool = False
+    # Initial extra closing (rad) of a gripping hand's flex set-points while its glove holds, switched on
+    # grip_anticipate frames early; annealed to 0 during training (supermimic.envs.mdp.grip_assist).
+    grip_assist: float = 0.0
+    grip_anticipate: int = 10
 
     @property
     def nj(self) -> int:
@@ -221,8 +225,9 @@ class RobotSpec:
 
     @property
     def goal_frame_dim(self) -> int:
-        """joint pos - q0 nj, joint vel nj, gravity 3, ang vel 3, lin vel 3, height 1, prop pose in the root frame 9 per prop."""
-        return 2 * self.nj + 10 + 9 * self.num_props
+        """joint pos - q0 nj, joint vel nj, gravity 3, ang vel 3, lin vel 3, height 1, prop pose in the root frame 9 per
+        prop, glove holding flag 1 per gripping hand."""
+        return 2 * self.nj + 10 + 9 * self.num_props + len(self.grip)
 
     def action_scale_vector(self) -> tuple[float, ...]:
         """Per actuated joint, its action scale (the first matching pattern of ``action_scale_fn``)."""
@@ -536,6 +541,7 @@ ROBOTS: dict[str, RobotSpec] = {
 ROBOTS["capsule_hands_props"] = replace(
     ROBOTS["capsule_hands"], name="capsule_hands_props", props=("broom", "dustpan"), grip=(("L", "broom"), ("R", "dustpan")),
     nconmax=96, njmax=600,  # the clip's reference poses need at most 27 contacts and 168 constraint rows
+    grip_assist=0.6,  # the reference replayed with 0.6 rad extra closing keeps both props through the whole clip
 )
 
 

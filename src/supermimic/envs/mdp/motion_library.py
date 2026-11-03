@@ -190,7 +190,6 @@ class MotionLibrary:
             self.body_lin_vel_w = t(body_chunks["lin"])
             self.body_ang_vel_w = t(body_chunks["ang"])
             del body_chunks
-            self.goal_feat = goal_features(self._split(self._ref), q0)
         else:
             from supermimic.data.motion_convert import load_robot_model
             from supermimic.kinematics.g1_fk import G1Kinematics
@@ -211,6 +210,19 @@ class MotionLibrary:
         self.bin_start = self.clip_start[bin_clip] + local_bin * self.bin_frames
         self.bin_end = torch.minimum(self.bin_start + self.bin_frames, self.clip_start[bin_clip] + self.clip_len[bin_clip])
         self.bin_clip = bin_clip
+
+        # (N, G) the glove of each hand of ROBOT.grip holds, and the same switched on ROBOT.grip_anticipate frames
+        # early inside each clip (supermimic.envs.mdp.grip_assist).
+        self.grip_hold = self.grip_hold_early = None
+        if ROBOT.grip:
+            self.grip_hold = self.taxel_pressed.amax(-1) > 0.5
+            early = self.grip_hold.clone()
+            for d in range(1, ROBOT.grip_anticipate + 1):
+                same = self.frame_clip[d:] == self.frame_clip[:-d]
+                early[:-d] |= self.grip_hold[d:] & same[:, None]
+            self.grip_hold_early = early
+        if not compact:
+            self.goal_feat = self._goal_features(torch.arange(self.num_frames, device=self.device))
 
     # ------------------------------------------------------------------ per-frame access
 
@@ -277,8 +289,13 @@ class MotionLibrary:
         idx = torch.minimum(frame[:, None] + offs[None, :], last[:, None])  # (N,k)
         if not self.compact:
             return self.goal_feat[idx].reshape(frame.shape[0], k * GOAL_FEAT_DIM)
-        feat = goal_features(self.ref(idx.reshape(-1)), self.default_joint_pos)
-        return feat.reshape(frame.shape[0], k * GOAL_FEAT_DIM)
+        return self._goal_features(idx.reshape(-1)).reshape(frame.shape[0], k * GOAL_FEAT_DIM)
+
+    def _goal_features(self, frame: torch.Tensor) -> torch.Tensor:
+        feat = goal_features(self.ref(frame), self.default_joint_pos)
+        if self.grip_hold is not None:
+            feat = torch.cat([feat, self.grip_hold[frame].to(feat.dtype)], dim=-1)
+        return feat
 
     def ref_qpos_qvel(self, frame: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """MuJoCo-layout reference state: qpos (N,NQ) and qvel (N,NV; root ang vel in body frame)."""

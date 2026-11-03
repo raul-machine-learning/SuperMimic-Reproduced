@@ -132,6 +132,26 @@ def test_episode_never_crosses_clip_boundary(env):
     assert fired
 
 
+@pytest.mark.skipif(not ROBOT.grip or not ROBOT.residual_actions, reason="robot has no grip assist")
+def test_grip_assist_moves_the_set_point(env):
+    from supermimic.envs.mdp import grip_assist
+
+    term = env.action_manager.get_term("joint_pos")
+    cmd = env.command_manager.get_term("motion")
+    lib = cmd.library
+    cmd.reset_to_frame(torch.arange(env.num_envs, device=env.device), lib.clip_start[lib.frame_clip[cmd.frame]] + 200)
+    base = term._reference_target().clone()
+    grip_assist.set_level(0.4)
+    try:
+        assisted = term._reference_target()
+    finally:
+        grip_assist.set_level(0.0)
+    nxt = torch.minimum(cmd.frame + 1, lib.last_frame_of(cmd.frame))
+    want = 0.4 * (lib.grip_hold_early[nxt].float() @ grip_assist.flex_mask(term.target_names, env.device).float())
+    assert lib.grip_hold_early[nxt].any()
+    torch.testing.assert_close(assisted - base, want)
+
+
 @pytest.mark.skipif(not ROBOT.mimic, reason="robot has no mimic joints")
 def test_reset_keeps_mimic_couplings(env):
     """Reset noise is drawn per joint; the followers must be re-driven so the joint equalities hold."""

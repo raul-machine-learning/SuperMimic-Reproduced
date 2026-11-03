@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import torch
 
 from supermimic.data.replay_buffer import StartBatch
+from supermimic.envs.mdp import grip_assist
 from supermimic.envs.mdp.motion_library import MotionLibrary
 from supermimic.envs.tracking_env_cfg import PROP_OBS_NOISE
 from supermimic.imagination.compiled import REWARD_TERM_NAMES, ImagStep
@@ -91,7 +92,12 @@ def imagine(
     if ROBOT.residual_actions:
         act = torch.tensor(ROBOT.joint_indices(ROBOT.actuated_joint_names), device=device)
         inv_scale = 1.0 / torch.tensor(ROBOT.action_scale_vector(), device=device)
-        a_offset_all = ((ref_all.joint_pos[:, act] - q0[act]) * inv_scale).reshape(horizon + 1, n, -1)
+        target = ref_all.joint_pos[:, act]
+        if lib.grip_hold_early is not None:
+            extra = grip_assist.assist_offset(lib.grip_hold_early[frames_all.reshape(-1)], grip_assist.flex_mask(ROBOT.actuated_joint_names, device))
+            if extra is not None:
+                target = target + extra
+        a_offset_all = ((target - q0[act]) * inv_scale).reshape(horizon + 1, n, -1)
     ref = ref_at(0)
     if anchor_obs:
         b0 = wm.heads.robot_bodies(s)
