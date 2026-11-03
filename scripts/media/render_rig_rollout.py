@@ -28,7 +28,7 @@ def main(rollout: Path, out: Path, clip: Path = ROOT / "data/hands/sweep_task023
          title: str = "Capsule hands: learned tracking policy", subtitle: str = "physics, hands in the air", fps: int = 30) -> None:
     from supermimic.robots import ROBOT
 
-    assert ROBOT.name == "capsule_hands", "run with SM_ROBOT=capsule_hands"
+    assert ROBOT.name.startswith("capsule_hands"), "run with SM_ROBOT=capsule_hands or capsule_hands_props"
     r = np.load(rollout)
     c = dict(np.load(clip))
     T = int(r["lengths"][index])

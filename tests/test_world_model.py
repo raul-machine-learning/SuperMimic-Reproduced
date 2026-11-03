@@ -15,6 +15,9 @@ _, _, JP, LV, _, JV = (slice(a, b) for a, b in ((0, 3), (3, 7), (7, 7 + NJ), (7 
 def _random_states(n, device, dtype=torch.float32):
     s = torch.randn(n, SD, device=device, dtype=dtype)
     s[:, 3:7] = s[:, 3:7] / s[:, 3:7].norm(dim=-1, keepdim=True)
+    for k in range(ROBOT.num_props):
+        q = slice(ROBOT.robot_state_dim + 13 * k + 3, ROBOT.robot_state_dim + 13 * k + 7)
+        s[:, q] = s[:, q] / s[:, q].norm(dim=-1, keepdim=True)
     return s
 
 
@@ -36,6 +39,11 @@ def test_state_spec_identity_and_errors():
     s_rot[:, 0:2] += torch.randn(64, 2, dtype=torch.float64)
     s_rot[:, 3:7] = quat_mul(qy, s[:, 3:7])
     s_rot[:, LV] = quat_apply(qy, s[:, LV])
+    for k in range(ROBOT.num_props):
+        b = ROBOT.robot_state_dim + 13 * k
+        s_rot[:, b : b + 3] = s_rot[:, 0:3] + quat_apply(qy, s[:, b : b + 3] - s[:, 0:3])
+        s_rot[:, b + 3 : b + 7] = quat_mul(qy, s[:, b + 3 : b + 7])
+        s_rot[:, b + 7 : b + 10] = quat_apply(qy, s[:, b + 7 : b + 10])
     np.testing.assert_allclose(spec.canonical(s_rot).numpy(), spec.canonical(s).numpy(), atol=1e-9)
     # Explicit integration with zero delta = constant-velocity extrapolation.
     spec2 = StateSpec(StateSpecCfg(explicit_integration=True), dev, torch.float64)

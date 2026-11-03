@@ -21,6 +21,7 @@ from supermimic.envs.mdp.motion_library import discover_npz
 from supermimic.envs.mdp.rewards import TrackingRewardCfg
 from supermimic.envs.state_io import NQ, StateIO
 from supermimic.eval.benchmark import load_policy_from_checkpoint
+from supermimic.robots import ROBOT
 
 
 @torch.no_grad()
@@ -45,13 +46,16 @@ def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed
         obs, _ = env.reset()
         cmd.forced_frame[:] = lib.clip_start[env_clip]  # keep the clip if an env is reset again
         max_r = TrackingRewardCfg().max_step_reward  # paper reward upper bound per step (G1: dt * 5)
-        rob, ref = [], []
+        rob, ref, props = [], [], []
         alive = torch.ones(n, dtype=torch.bool, device=device)
         rew_sum = torch.zeros(n, device=device)
         steps = torch.zeros(n, dtype=torch.long, device=device)
 
         def snapshot() -> None:
-            rob.append(io.read()[:, :NQ].cpu().numpy())
+            s = io.read()
+            rob.append(s[:, :NQ].cpu().numpy())
+            if ROBOT.props:
+                props.append(s[:, ROBOT.robot_state_dim :].reshape(n, ROBOT.num_props, 13)[..., :7].cpu().numpy())
             ref.append(lib.ref_qpos_qvel(cmd.frame)[0].cpu().numpy())
 
         snapshot()
@@ -75,7 +79,15 @@ def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed
             ref_qpos[i, lengths[i]:] = ref_qpos[i, lengths[i] - 1]
         out.parent.mkdir(parents=True, exist_ok=True)
         norm_return = (rew_sum / (max_r * steps.clamp(min=1))).cpu().numpy()
-        np.savez_compressed(out, names=np.array(names), robot_qpos=robot_qpos[:, :T], ref_qpos=ref_qpos[:, :T], lengths=lengths, norm_return=norm_return)
+        extra = {}
+        if ROBOT.props:
+            from supermimic.envs.props import PROP_SOURCES
+
+            prop_qpos = np.stack(props, 1)
+            for i in range(n):
+                prop_qpos[i, lengths[i]:] = prop_qpos[i, lengths[i] - 1]
+            extra = dict(prop_qpos=prop_qpos[:, :T], prop_names=np.array(ROBOT.props), prop_source_names=np.array([PROP_SOURCES[p] for p in ROBOT.props]))
+        np.savez_compressed(out, names=np.array(names), robot_qpos=robot_qpos[:, :T], ref_qpos=ref_qpos[:, :T], lengths=lengths, norm_return=norm_return, **extra)
         for i, nm in enumerate(names):
             print(f"{nm:48s} steps {int(lengths[i]):5d}/{lib.clips[i].length}  return {float(norm_return[i]):.3f}")
         print("saved", out)
