@@ -1,8 +1,8 @@
 """Two floating capsule hands built from the sweep mocap skeleton, and the mocap replayed on them.
 
-  uv run --with h5py python scripts/assets/build_capsule_hands.py
+  uv run python scripts/assets/build_capsule_hands.py
 
-The hands are the actor's own (real scale, no robot in between). Each hand is a tree of the mocap's hand bones,
+The hands are the actor's own, read straight from the mocap at real scale: no robot and no retargeting in between. Each hand is a tree of the mocap's hand bones,
 rooted at the ``{Left,Right}Hand`` bone on a free joint:
 
   palm      Hand + the four InHand* metacarpal bones (they rotate < 1 deg in the recording: rigid)
@@ -22,7 +22,6 @@ in the model's hinge order, the props, the table, the glove pressure and the moc
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import mujoco
@@ -30,8 +29,9 @@ import numpy as np
 import tyro
 from scipy.spatial.transform import Rotation
 
+from supermimic.data.sweep_mocap import estimate_table, load_human, load_pressure, load_props
+
 ROOT = Path(__file__).resolve().parents[2]
-RETARGET_ROOT = Path.home() / "g1-sweep-retarget"
 ASSET = ROOT / "src/supermimic/assets/capsule_hands/capsule_hands.xml"
 
 SIDES = {"L": "Left", "R": "Right"}
@@ -88,15 +88,11 @@ def add_capsule(body, name: str, a: np.ndarray, b: np.ndarray, radius: float, rg
                   rgba=rgba, density=1000.0, condim=4, friction=[1.0, 0.005, 0.0001])
 
 
-def main(mocap_dir: Path = ROOT / "data/sweep_mocap", retarget_root: Path = RETARGET_ROOT, clip: str = "sweep_task023_hands",
-         out_dir: Path = ROOT / "data/hands", asset: Path = ASSET) -> None:
-    sys.path.insert(0, str(retarget_root))
-    from sweep_retarget.mocap import load_human, load_pressure, load_props, raw_timestamp_origin
-    from sweep_retarget.scene import estimate_table
-
+def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023_hands", out_dir: Path = ROOT / "data/hands",
+         asset: Path = ASSET) -> None:
     human = load_human(mocap_dir)
     props = load_props(mocap_dir)
-    pressure = load_pressure(mocap_dir, raw_timestamp_origin(mocap_dir))
+    pressure = load_pressure(mocap_dir)
     T = len(human.times)
     idx = human.index
 

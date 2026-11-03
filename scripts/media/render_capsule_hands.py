@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 os.environ.setdefault("MUJOCO_GL", "egl")
@@ -22,12 +21,24 @@ import numpy as np
 import tyro
 from PIL import Image, ImageDraw, ImageFont
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from render_contact_audit import PROP_MESHES, PROP_RGBA, label
+from supermimic.data.sweep_mocap import PROP_MESHES
 
 ROOT = Path(__file__).resolve().parents[2]
 HANDS_XML = ROOT / "src/supermimic/assets/capsule_hands/capsule_hands.xml"
 CONTACT_RGBA = np.array([0.15, 0.85, 0.30, 1.0])
+PROP_RGBA = {"cleaningtools_broom": [0.80, 0.55, 0.30, 1], "cleaningtools_dustpan": [0.30, 0.50, 0.80, 1],
+             "TrashBucket_chip": [0.55, 0.60, 0.55, 1]}
+
+
+def label(im: Image.Image, xy: tuple[int, int], lines: list[str], font, font_small) -> None:
+    dr = ImageDraw.Draw(im, "RGBA")
+    pad, x, y = 10, *xy
+    w = max([dr.textlength(lines[0], font=font)] + [dr.textlength(s, font=font_small) for s in lines[1:]]) + 2 * pad
+    h = 2 * pad + 26 + 22 * (len(lines) - 1)
+    dr.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=(20, 24, 32, 160))
+    dr.text((x + pad, y + pad - 2), lines[0], font=font, fill=(255, 255, 255, 255))
+    for i, s in enumerate(lines[1:]):
+        dr.text((x + pad, y + pad + 26 + 22 * i), s, font=font_small, fill=(215, 222, 235, 255))
 
 
 def build_model(clip: dict, mocap_dir: Path, ghosts: bool) -> tuple[mujoco.MjModel, list[str]]:
