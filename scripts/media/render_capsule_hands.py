@@ -55,6 +55,8 @@ def build_model(clip: dict, mocap_dir: Path, ghosts: bool) -> tuple[mujoco.MjMod
     spec.add_texture(name="grid", type=mujoco.mjtTexture.mjTEXTURE_2D, builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
                      rgb1=[0.90, 0.91, 0.93], rgb2=[0.76, 0.78, 0.82], width=512, height=512)
     spec.add_material(name="grid", textures=["", "grid"], texrepeat=[2, 2], texuniform=True)
+    spec.add_texture(name="sky", type=mujoco.mjtTexture.mjTEXTURE_SKYBOX, builtin=mujoco.mjtBuiltin.mjBUILTIN_GRADIENT,
+                     rgb1=[0.93, 0.95, 0.98], rgb2=[0.70, 0.76, 0.84], width=512, height=3072)
     w = spec.worldbody
     w.add_geom(name="floor", type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], material="grid", contype=0, conaffinity=0)
     w.add_light(pos=[0, 0, 5], dir=[0, 0, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL, diffuse=[0.45, 0.45, 0.45], castshadow=True)

@@ -13,7 +13,8 @@ Hinge axes come from the recorded local bone rotations: the principal axes of th
 first. The angles are the intrinsic Euler decomposition of each local rotation about those axes; the dropped third
 axis is under 1 deg in this recording. Flexion is signed geometrically: a positive angle moves the fingertip toward
 the wrist (the thumb tip toward the middle finger's knuckle), at the clip's median pose. Every bone is a capsule from
-its joint to its child's; the palm is capsules from the wrist to each metacarpal and along the metacarpals.
+its joint to its child's; the palm is one ray of two capsules per finger, from a heel point to the knuckle (the heel
+points spread wider than the mocap's metacarpal bases, as the flesh is), a capsule across the heel, and the thenar.
 Fingers are position-driven (effort-limited, like tendons); the free roots are driven by whoever uses the model.
 
 Writes ``src/supermimic/assets/capsule_hands/capsule_hands.xml`` and ``data/hands/<clip>.npz`` holding, on the
@@ -30,6 +31,7 @@ import numpy as np
 import tyro
 from scipy.spatial.transform import Rotation
 
+from supermimic.data.glove_taxels import flexion_alignment, flexion_check
 from supermimic.data.sweep_mocap import estimate_table, load_human, load_pressure, load_props
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,10 +49,15 @@ THUMB_RADIUS = (0.0120, 0.0105, 0.0095)
 METACARPAL_RADIUS = {"Index": 0.0110, "Middle": 0.0110, "Ring": 0.0105, "Pinky": 0.0095}
 WRIST_RADIUS = 0.0120
 THENAR_RADIUS = 0.0130
+HEEL_SPREAD = 0.70  # heel width / knuckle width, between the outer finger rays
+HEEL_ALONG = 0.015  # heel points this far from the wrist toward the knuckles (m)
+PALM_SPLIT = 0.40  # share of each palm ray carried by the hand body; the rest is on the metacarpal body
 # per hinge kind: effort limit (N m), stiffness (N m / rad); damping gives a damping ratio ~1 on the armature
 EFFORT = {"flex1": 2.0, "spread1": 1.0, "flex2": 1.0, "flex3": 0.5, "thumb_flex1": 2.0, "thumb_spread1": 2.0,
           "thumb_flex2": 1.5, "thumb_spread2": 1.0, "thumb_flex3": 0.8}
 ARMATURE = 2.0e-3
+WRIST_ARMATURE = {"slide": 0.05, "hinge": 2.0e-3}
+RIG_ASSET = ROOT / "src/supermimic/assets/capsule_hands/capsule_rig.xml"
 SKIN = [0.87, 0.72, 0.62, 1.0]
 SKIN_R = [0.80, 0.66, 0.58, 1.0]
 
@@ -90,11 +97,17 @@ def add_capsule(body, name: str, a: np.ndarray, b: np.ndarray, radius: float, rg
                   rgba=rgba, density=1000.0, condim=4, friction=[1.0, 0.005, 0.0001])
 
 
-def make_spec(human, flip: set[str]) -> tuple[mujoco.MjSpec, dict[str, np.ndarray], list]:
-    """The two hands; ``flip``: flexion hinges whose mean-flexion sign is reversed."""
+def make_spec(human, flip: set[str], rig: dict[str, tuple[np.ndarray, np.ndarray]] | None = None
+              ) -> tuple[mujoco.MjSpec, dict[str, np.ndarray], list]:
+    """The two hands; ``flip``: flexion hinges whose mean-flexion sign is reversed.
+
+    Without ``rig`` each hand is a free body. With ``rig`` (side -> wrist origin, wrist orientation) both hang from
+    one root body ``rig`` (a free joint welded to the world, so the model keeps a floating root) through six wrist
+    joints each, one per body: slides along world x, y, z, then hinges about the wrist's own y, x, z axes, all zero
+    at the given wrist pose."""
     idx = human.index
     spec = mujoco.MjSpec()
-    spec.modelname = "capsule_hands"
+    spec.modelname = "capsule_rig" if rig else "capsule_hands"
     spec.compiler.degree = False
     joint_angles: dict[str, np.ndarray] = {}
     report = []
@@ -102,13 +115,56 @@ def make_spec(human, flip: set[str]) -> tuple[mujoco.MjSpec, dict[str, np.ndarra
     def child_pos(name: str) -> np.ndarray:
         return local_frames(human, idx(name))[1].mean(0)
 
+    def light_body(parent, name: str, **kw):
+        b = parent.add_body(name=name, **kw)
+        b.explicitinertial, b.mass, b.inertia = True, 1e-3, [1e-7, 1e-7, 1e-7]
+        b.gravcomp = 1.0
+        return b
+
+    root = None
+    if rig:
+        root = spec.worldbody.add_body(name="rig")
+        root.add_freejoint(name="rig_root")
+        root.explicitinertial, root.mass, root.inertia, root.gravcomp = True, 1.0, [1e-2, 1e-2, 1e-2], 1.0
+        spec.add_equality(type=mujoco.mjtEq.mjEQ_WELD, name="rig_weld", name1="rig", objtype=mujoco.mjtObj.mjOBJ_BODY)
+
     for S, side in SIDES.items():
         rgba = SKIN if S == "L" else SKIN_R
-        hand = spec.worldbody.add_body(name=f"{S}_hand")
-        hand.add_freejoint(name=f"{S}_hand_root")
+        if rig:
+            p0, q0 = rig[S]
+            parent = light_body(root, f"{S}_wrist_x", pos=p0)
+            parent.add_joint(name=f"{S}_wrist_x", type=mujoco.mjtJoint.mjJNT_SLIDE, axis=[1, 0, 0], armature=WRIST_ARMATURE["slide"])
+            for ax, n in (([0, 1, 0], "y"), ([0, 0, 1], "z")):
+                parent = light_body(parent, f"{S}_wrist_{n}")
+                parent.add_joint(name=f"{S}_wrist_{n}", type=mujoco.mjtJoint.mjJNT_SLIDE, axis=ax, armature=WRIST_ARMATURE["slide"])
+            parent = light_body(parent, f"{S}_wrist_ry", quat=q0)
+            parent.add_joint(name=f"{S}_wrist_ry", type=mujoco.mjtJoint.mjJNT_HINGE, axis=[0, 1, 0], armature=WRIST_ARMATURE["hinge"])
+            parent = light_body(parent, f"{S}_wrist_rx")
+            parent.add_joint(name=f"{S}_wrist_rx", type=mujoco.mjtJoint.mjJNT_HINGE, axis=[1, 0, 0], armature=WRIST_ARMATURE["hinge"])
+            hand = parent.add_body(name=f"{S}_hand")
+            hand.add_joint(name=f"{S}_wrist_rz", type=mujoco.mjtJoint.mjJNT_HINGE, axis=[0, 0, 1], armature=WRIST_ARMATURE["hinge"])
+        else:
+            hand = spec.worldbody.add_body(name=f"{S}_hand")
+            hand.add_freejoint(name=f"{S}_hand_root")
         hand.add_site(name=f"{S}_wrist", size=[0.004, 0, 0])
         zero = np.zeros(3)
-        add_capsule(hand, f"{S}_thenar", zero, child_pos(f"{side}HandThumb1"), THENAR_RADIUS, rgba)
+        # Palm: one ray per finger from a heel point to its knuckle. The mocap's metacarpal bones start within ~2 cm
+        # of each other at the wrist; the heel points spread them to HEEL_SPREAD of the knuckle spread, the width of
+        # the flesh at the heel of a real hand.
+        mc_frame, knuckle = {}, {}
+        for f in FINGERS:
+            r0, lp0 = local_frames(human, idx(f"{side}InHand{f}"))
+            R0 = Rotation.from_rotvec(r0.as_rotvec().mean(0))
+            mc_frame[f] = (lp0.mean(0), R0)
+            knuckle[f] = lp0.mean(0) + R0.apply(child_pos(f"{side}Hand{f}1"))
+        along = knuckle["Middle"] / np.linalg.norm(knuckle["Middle"])
+        radial = knuckle["Index"] - knuckle["Pinky"]
+        radial = radial - (radial @ along) * along
+        radial /= np.linalg.norm(radial)
+        k_mid = np.mean([knuckle[f] for f in FINGERS], 0)
+        heel = {f: HEEL_ALONG * along + HEEL_SPREAD * ((knuckle[f] - k_mid) @ radial) * radial for f in FINGERS}
+        add_capsule(hand, f"{S}_heel", heel["Index"], heel["Pinky"], WRIST_RADIUS, rgba)
+        add_capsule(hand, f"{S}_thenar", heel["Index"], child_pos(f"{side}HandThumb1"), THENAR_RADIUS, rgba)
 
         def chain(parent_body, bones: list[str], joints: dict, radii, prefix: str, tip: str) -> None:
             body_parent = parent_body
@@ -140,10 +196,11 @@ def make_spec(human, flip: set[str]) -> tuple[mujoco.MjSpec, dict[str, np.ndarra
 
         for f in FINGERS:
             fl = f.lower()
-            r0, lp0 = local_frames(human, idx(f"{side}InHand{f}"))
-            mc = hand.add_body(name=f"{S}_{fl}0", pos=lp0.mean(0), quat=Rotation.from_rotvec(r0.as_rotvec().mean(0)).as_quat(scalar_first=True))
-            add_capsule(hand, f"{S}_{fl}_wrist", zero, lp0.mean(0), WRIST_RADIUS, rgba)
-            add_capsule(mc, f"{S}_{fl}0", zero, child_pos(f"{side}Hand{f}1"), METACARPAL_RADIUS[f], rgba)
+            p0, R0 = mc_frame[f]
+            mc = hand.add_body(name=f"{S}_{fl}0", pos=p0, quat=R0.as_quat(scalar_first=True))
+            mid = heel[f] + PALM_SPLIT * (knuckle[f] - heel[f])
+            add_capsule(hand, f"{S}_{fl}_wrist", heel[f], mid, WRIST_RADIUS, rgba)
+            add_capsule(mc, f"{S}_{fl}0", R0.inv().apply(mid - p0), child_pos(f"{side}Hand{f}1"), METACARPAL_RADIUS[f], rgba)
             chain(mc, [f"{side}Hand{f}{k}" for k in (1, 2, 3)], FINGER_JOINTS, FINGER_RADIUS[f], f"{S}_{fl}", f"{side}Hand{f}3_End")
         chain(hand, [f"{side}HandThumb{k}" for k in (1, 2, 3)], THUMB_JOINTS, THUMB_RADIUS, f"{S}_thumb", f"{side}HandThumb3_End")
 
@@ -153,6 +210,12 @@ def make_spec(human, flip: set[str]) -> tuple[mujoco.MjSpec, dict[str, np.ndarra
         for i, b1 in enumerate(bodies):
             for b2 in bodies[i + 1 :]:
                 spec.add_exclude(bodyname1=b1, bodyname2=b2)
+    if rig:
+        # The arm carries the hand's weight; the actuators are configured by the training environment.
+        for b in spec.bodies:
+            if b.name[:2] in ("L_", "R_"):
+                b.gravcomp = 1.0
+        return spec, joint_angles, report
 
     for j in spec.joints:
         if j.type != mujoco.mjtJoint.mjJNT_HINGE:
@@ -172,34 +235,24 @@ def make_spec(human, flip: set[str]) -> tuple[mujoco.MjSpec, dict[str, np.ndarra
 
 
 def flexion_flips(model: mujoco.MjModel, joint_angles: dict[str, np.ndarray], step: float = 0.05) -> set[str]:
-    """Flexion hinges whose positive direction moves the tip away from the palm, at the clip's median pose."""
+    """Flexion hinges whose positive direction opens the hand (``flexion_alignment`` < 0), at the clip's median pose."""
+    data = median_pose(model, joint_angles)
+    return {n for n in joint_angles if n.endswith("_flex") and flexion_alignment(model, data, n) < 0}
+
+
+def median_pose(model: mujoco.MjModel, joint_angles: dict[str, np.ndarray]) -> mujoco.MjData:
     data = mujoco.MjData(model)
-    hinges = [n for n in joint_angles]
-    for n in hinges:
-        data.qpos[model.jnt_qposadr[model.joint(n).id]] = np.median(joint_angles[n])
-    flips = set()
-    for n in hinges:
-        if not n.endswith("_flex"):
-            continue
-        S, rest = n.split("_", 1)
-        finger = rest[: next(i for i, ch in enumerate(rest) if ch.isdigit())]
-        tip = model.site(f"{S}_{finger}_tip").id
-        target = model.body(f"{S}_middle1").id if finger == "thumb" else model.body(f"{S}_hand").id
-        a = model.jnt_qposadr[model.joint(n).id]
-        q0 = data.qpos[a]
-        dist = []
-        for dq in (step, -step):
-            data.qpos[a] = q0 + dq
-            mujoco.mj_kinematics(model, data)
-            dist.append(np.linalg.norm(data.site_xpos[tip] - data.xpos[target]))
-        data.qpos[a] = q0
-        if dist[0] > dist[1]:
-            flips.add(n)
-    return flips
+    for j in range(model.njnt):
+        if model.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE:
+            data.qpos[model.jnt_qposadr[j] + 3] = 1.0
+    for n, q in joint_angles.items():
+        data.qpos[model.jnt_qposadr[model.joint(n).id]] = np.median(q)
+    mujoco.mj_kinematics(model, data)
+    return data
 
 
 def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023_hands", out_dir: Path = ROOT / "data/hands",
-         asset: Path = ASSET) -> None:
+         asset: Path = ASSET, rig_asset: Path = RIG_ASSET) -> None:
     human = load_human(mocap_dir)
     props = load_props(mocap_dir)
     pressure = load_pressure(mocap_dir)
@@ -234,6 +287,37 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
         for i, (site, bone) in enumerate(tips):
             err[t, i] = np.linalg.norm(data.site_xpos[model.site(site).id] - human.pos[t, idx(bone)])
 
+    # The rig: wrists on 6 joints each, zeroed at each wrist's mean pose over the clip.
+    rig_pose = {}
+    for k, S in enumerate(SIDES):
+        r = Rotation.from_quat(base_quat[:, k], scalar_first=True)
+        rig_pose[S] = (base_pos[:, k].mean(0), r.mean().as_quat(scalar_first=True))
+    rig_spec, _, _ = make_spec(human, flips, rig_pose)
+    rig_model = rig_spec.compile()
+    rig_asset.write_text(rig_spec.to_xml())
+    rig_names = [rig_model.joint(i).name for i in range(1, rig_model.njnt)]
+    wrist = {}
+    for k, S in enumerate(SIDES):
+        p0, q0 = rig_pose[S]
+        rel = Rotation.from_quat(q0, scalar_first=True).inv() * Rotation.from_quat(base_quat[:, k], scalar_first=True)
+        ang = np.unwrap(rel.as_euler("YXZ"), axis=0)  # intrinsic: R = Ry Rx Rz, matching the joint order
+        mid = np.degrees(np.abs(ang[:, 1]).max())
+        assert mid < 75.0, f"{S} wrist middle angle reaches {mid:.0f} deg: too close to gimbal lock"
+        for i, n in enumerate("xyz"):
+            wrist[f"{S}_wrist_{n}"] = base_pos[:, k, i] - p0[i]
+        for i, n in enumerate(("ry", "rx", "rz")):
+            wrist[f"{S}_wrist_{n}"] = ang[:, i]
+    rig_joint_pos = np.stack([wrist[n] if n in wrist else joint_angles[n] for n in rig_names], 1)
+    rig_data = mujoco.MjData(rig_model)
+    rig_data.qpos[3] = 1.0
+    rig_qadr = [rig_model.jnt_qposadr[rig_model.joint(n).id] for n in rig_names]
+    rig_err = np.zeros((T, len(tips)))
+    for t in range(T):
+        rig_data.qpos[rig_qadr] = rig_joint_pos[t]
+        mujoco.mj_kinematics(rig_model, rig_data)
+        for i, (site, bone) in enumerate(tips):
+            rig_err[t, i] = np.linalg.norm(rig_data.site_xpos[rig_model.site(site).id] - human.pos[t, idx(bone)])
+
     table = estimate_table(props.pos, human.p("Hips"))
     hand_bones = [n for n in human.names if "Hand" in n]
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -246,7 +330,11 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
         pressure_left=pressure.left if pressure else np.zeros((0, 129), np.uint8),
         pressure_right=pressure.right if pressure else np.zeros((0, 129), np.uint8),
         human_hand_names=np.array(hand_bones), human_hand_pos=human.pos[:, [idx(n) for n in hand_bones]], mocap_dir=str(mocap_dir),
+        rig_joint_names=np.array(rig_names), rig_joint_pos=rig_joint_pos,
+        rig_wrist_pos0=np.stack([rig_pose[S][0] for S in SIDES]), rig_wrist_quat0=np.stack([rig_pose[S][1] for S in SIDES]),
     )
+    print(f"wrote {rig_asset}: {len(rig_names)} joints under the welded root (6 wrist + 21 finger per hand); "
+          f"fingertip replay error mean {rig_err.mean() * 1000:.1f} mm, max {rig_err.max() * 1000:.1f} mm")
     mass = {S: sum(model.body_mass[b] for b in range(model.nbody) if model.body(b).name.startswith(f"{S}_")) for S in SIDES}
     print(f"wrote {asset}: {len(hinges)} finger hinges, {model.nu} actuators, hand mass L {mass['L']:.3f} R {mass['R']:.3f} kg")
     print(f"wrote {out}: {T} frames ({human.times[-1]:.1f} s)")
@@ -254,6 +342,9 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
     worst = max(report, key=lambda x: x[2])
     print(f"  largest rotation left out by the hinges: {worst[2]:.1f} deg ({worst[0]})")
     print(f"  flexion signs reversed from the mean-flexion guess: {', '.join(sorted(flips)) or 'none'}")
+    align = {S: flexion_check(model, median_pose(model, joint_angles), S) for S in SIDES}
+    for S in SIDES:
+        print(f"  {S} flexion toward the palm (cosine, median pose): " + " ".join(f"{n[2:-5]} {v:+.2f}" for n, v in align[S].items()))
     for n in hinges:
         j = model.joint(n)
         a = joint_angles[n]

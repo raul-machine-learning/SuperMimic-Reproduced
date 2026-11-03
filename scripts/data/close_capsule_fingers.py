@@ -4,7 +4,7 @@
 
 The mocap's fingers barely curl (most middle and end joints stay within +-10 deg) and its hands sit 1-4 cm off the
 handles, so replaying them in physics closes on air. On every frame where a finger's glove regions are loaded
-(dilated by ``dilate_s``), this curls that finger along its flexion hinges (in the ratios of ``CLOSE_RATIO``, within
+(dilated by ``dilate_s``), this curls that finger along its ``CLOSE_JOINTS`` (in the ratios of ``CLOSE_RATIO``, within
 the joint ranges) until it first touches the held prop, by at most ``max_close`` rad; a finger that cannot reach the
 prop is left as recorded. The closure is smoothed in time. Wrist poses, props and the glove data are untouched.
 
@@ -25,11 +25,20 @@ from scipy.ndimage import binary_dilation, uniform_filter1d
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_capsule_hands import FINGERS, HELD_CANDIDATES, REGION_BODIES, SIDE_NAME, SIDES, Hands, Reference, build, kinematic_audit, loaded_regions, region_finger
 
+from supermimic.data.glove_taxels import flexion_alignment
 from supermimic.data.sweep_mocap import REGIONS
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "assets"))
+from build_capsule_hands import median_pose
+
 ROOT = Path(__file__).resolve().parents[2]
-# share of the closure each flexion hinge takes, by its position along the finger
-CLOSE_RATIO = {"thumb": {1: 0.5, 2: 1.0, 3: 0.7}, "finger": {1: 1.0, 2: 1.0, 3: 0.7}}
+# share of the closure each hinge takes, by its position along the finger; the sign of each hinge is the one that
+# moves the fingertip toward the palm (supermimic.data.glove_taxels.flexion_alignment)
+CLOSE_RATIO = {"thumb": {1: 0.7, 2: 1.0, 3: 0.7}, "finger": {1: 1.0, 2: 1.0, 3: 0.7}}
+# The thumb's base flexion hinge swings the thumb across the palm, past a handle in the hand; its sideways hinge is
+# the one that brings the thumb pad onto the handle.
+CLOSE_JOINTS = {"thumb": ((1, "spread"), (2, "flex"), (3, "flex")),
+                **{f: ((1, "flex"), (2, "flex"), (3, "flex")) for f in ("index", "middle", "ring", "pinky")}}
 
 
 def main(clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", out: Path | None = None, props_dir: Path = ROOT / "data/props",
@@ -52,11 +61,13 @@ def main(clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", out: Path | N
     prop_qadr = {n: model.jnt_qposadr[model.joint(f"{n}_free").id] for n in HELD_CANDIDATES}
     prop_geoms = {n: [g for g in range(model.ngeom) if model.geom_bodyid[g] == model.body(n).id] for n in HELD_CANDIDATES}
 
-    fingers = {}  # (side, finger) -> (flex hinge columns, ratios, finger geoms)
+    fingers = {}  # (side, finger) -> (closing hinge columns, signed ratios, finger geoms)
+    pose = median_pose(model, {n: c["joint_pos"][:, i] for i, n in enumerate(names)})
     for S in SIDES:
         for f in FINGERS:
-            cols = [i for i, n in enumerate(names) if n.startswith(f"{S}_{f}") and n.endswith("_flex")]
-            ratio = np.array([CLOSE_RATIO["thumb" if f == "thumb" else "finger"][int(names[i][len(f"{S}_{f}")])] for i in cols])
+            cols = [names.index(f"{S}_{f}{k}_{kind}") for k, kind in CLOSE_JOINTS[f]]
+            ratio = np.array([CLOSE_RATIO["thumb" if f == "thumb" else "finger"][k] for k, _ in CLOSE_JOINTS[f]])
+            ratio *= [np.sign(flexion_alignment(model, pose, names[i])) for i in cols]
             geoms = [g for k in (1, 2, 3) for g in hands.geoms[model.body(f"{S}_{f}{k}").id]]
             fingers[(S, f)] = (np.array(cols), ratio, geoms)
     lo, hi = model.jnt_range[[model.joint(n).id for n in names]].T

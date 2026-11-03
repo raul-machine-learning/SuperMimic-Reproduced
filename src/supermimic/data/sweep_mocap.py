@@ -227,6 +227,23 @@ REGIONS["palm_lower_little_side"] = _palm((3, 4), "little")
 assert sorted(i for v in REGIONS.values() for i in v) == list(range(129))
 
 
+def taxel_load(raw: np.ndarray, p_times: np.ndarray, times: np.ndarray, rest: tuple[float, float] = (0.0, 2.0)) -> np.ndarray:
+    """(T, 129) load above each taxel's rest baseline (raw units), on ``times``."""
+    sel = (p_times >= rest[0]) & (p_times < rest[1])
+    if not sel.any():
+        raise ValueError(f"no pressure samples in the rest window {rest}")
+    load = np.clip(raw.astype(np.float64) - raw[sel].astype(np.float64).mean(0), 0.0, None)
+    return np.stack([np.interp(times, p_times, load[:, i]) for i in range(load.shape[1])], 1)
+
+
+def taxel_pressed(raw: np.ndarray, p_times: np.ndarray, times: np.ndarray, rest: tuple[float, float] = (0.0, 2.0),
+                  rel: float = 0.25, floor: float = 3.0) -> np.ndarray:
+    """(T, 129) bool on ``times``: a taxel's load above its rest baseline exceeds ``rel`` of its clip maximum and
+    ``floor`` raw units."""
+    load = taxel_load(raw, p_times, times, rest)
+    return load > np.maximum(rel * load.max(0), floor)
+
+
 def region_loaded(raw: np.ndarray, p_times: np.ndarray, times: np.ndarray, rest: tuple[float, float] = (0.0, 2.0),
                   rel: float = 0.15, floor: float = 3.0) -> np.ndarray:
     """(T, len(REGIONS)) bool on ``times``: a region's load above the rest baseline exceeds ``rel`` of its clip
