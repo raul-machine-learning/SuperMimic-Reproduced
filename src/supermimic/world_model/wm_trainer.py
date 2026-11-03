@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 
 from supermimic.data.replay_buffer import ReplayBuffer, WindowBatch
 from supermimic.envs.mdp.motion_library import MotionLibrary
+from supermimic.robots import ROBOT
 from supermimic.world_model.heads import ReferenceFrame
 from supermimic.training.distributed import allreduce_grads
 from supermimic.world_model.world_model import WorldModel
@@ -22,6 +23,9 @@ class WMTrainerCfg:
     grad_clip: float = 1.0
     weight_decay: float = 0.0
     compile: str | None = "default"
+    # Also fit windows that end early at a terminal row (episodes shorter than the window). On by default for
+    # the welded-root rigs, whose tight wrist / prop terminations can end episodes within a few steps.
+    short_windows: bool = field(default_factory=lambda: ROBOT.fixed_root)
 
 
 def reference_at(lib: MotionLibrary, frame: torch.Tensor) -> ReferenceFrame:
@@ -58,12 +62,12 @@ class WorldModelTrainer:
         sl = [slice(j * n, (j + 1) * n) for j in range(k)]
         pp = r.prop_pos_w
         refs = [ReferenceFrame(None, None, None, None, r.root_pos_w[s], r.root_quat_w[s], r.joint_pos[s], None if pp is None else pp[s]) for s in sl]
-        return self.wm.window_loss(w.states, w.a_exec, w.xi, w.done, refs)
+        return self.wm.window_loss(w.states, w.a_exec, w.xi, w.done, refs, w.mask)
 
     def update(self, buffer: ReplayBuffer) -> dict[str, float]:
         agg: dict[str, torch.Tensor] = {}
         for _ in range(self.cfg.batches_per_update):
-            w = buffer.sample_windows(self.cfg.batch_size, self.cfg.window)
+            w = buffer.sample_windows(self.cfg.batch_size, self.cfg.window, self.cfg.short_windows)
             loss, m = self.loss_on(w)
             self.opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -81,5 +85,5 @@ class WorldModelTrainer:
     @torch.no_grad()
     def online_error(self, buffer: ReplayBuffer, n: int = 1024, k: int = 8) -> torch.Tensor:
         """k-step open-loop error on (recent) replay windows; (k,) tensor."""
-        w = buffer.sample_windows(n, k)
-        return self.wm.rollout_error(w.states, w.a_exec, w.xi)
+        w = buffer.sample_windows(n, k, self.cfg.short_windows)
+        return self.wm.rollout_error(w.states, w.a_exec, w.xi, w.mask)

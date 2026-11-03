@@ -76,12 +76,13 @@ class WorldModel(nn.Module):
     def enable_compile(self, mode: str | None = "default") -> None:
         self._loss_step_fn = torch.compile(self._loss_step, mode=None if mode == "default" else mode, dynamic=False) if mode else self._loss_step
 
-    def window_loss(self, states: torch.Tensor, a_exec: torch.Tensor, xi: torch.Tensor, done: torch.Tensor, refs: list[ReferenceFrame]):
+    def window_loss(self, states: torch.Tensor, a_exec: torch.Tensor, xi: torch.Tensor, done: torch.Tensor, refs: list[ReferenceFrame],
+                    mask: torch.Tensor | None = None):
         """k-step autoregressive loss.
 
         states: (k+1, n, 71) logged states; a_exec: (k, n, 29); xi: (n, 33);
         done: (k, n) termination label of states 1..k; refs[j]: reference of transition j (for the
-        termination features of state j+1).
+        termination features of state j+1); mask: (k, n) 0 for the padding of windows that end early.
         """
         k = a_exec.shape[0]
         s = states[0]
@@ -94,14 +95,19 @@ class WorldModel(nn.Module):
         step_fn = getattr(self, "_loss_step_fn", None) or self._loss_step
         for j in range(k):
             s, sq, bce, logits = step_fn(s, a_exec[j], xi, states[j + 1], done[j], refs[j].root_pos_w, refs[j].root_quat_w, refs[j].joint_pos, refs[j].prop_pos_w)
-            total_state = total_state + sq.sum(-1).mean()
-            total_term = total_term + bce.mean()
+            if mask is None:
+                mean = lambda x: x.mean()  # noqa: E731
+            else:
+                m = mask[j]
+                mean = lambda x, m=m: torch.where(m > 0, x, 0.0).sum() / m.sum().clamp_min(1.0)  # noqa: E731
+            total_state = total_state + mean(sq.sum(-1))
+            total_term = total_term + mean(bce)
             with torch.no_grad():
-                nse = sq.mean(-1).mean()
+                nse = mean(sq.mean(-1))
                 if j == 0:
                     err_first = nse
                 err_last = nse
-                acc_num += ((logits > 0).float() == done[j]).float().mean()
+                acc_num += mean(((logits > 0).float() == done[j]).float())
         loss = total_state / k + self.cfg.term_loss_weight * total_term / k
         # Metrics stay on-device (detached tensors): a float() here would stall the CPU on the
         # forward pass every minibatch, which in data-parallel runs turns into lockstep waiting.
@@ -117,12 +123,13 @@ class WorldModel(nn.Module):
     # ------------------------------------------------------------------ diagnostics
 
     @torch.no_grad()
-    def rollout_error(self, states: torch.Tensor, a_exec: torch.Tensor, xi: torch.Tensor) -> torch.Tensor:
-        """Open-loop k-step normalised squared error per step (k,), averaged over the batch."""
+    def rollout_error(self, states: torch.Tensor, a_exec: torch.Tensor, xi: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        """Open-loop k-step normalised squared error per step (k,), averaged over the batch (real transitions only)."""
         k = a_exec.shape[0]
         s = states[0]
         out = []
         for j in range(k):
             s = self.step(s, a_exec[j], xi)
-            out.append(self.spec.normalized_sq_error(s, states[j + 1]).mean())
+            e = self.spec.normalized_sq_error(s, states[j + 1])
+            out.append(e.mean() if mask is None else torch.where(mask[j] > 0, e, 0.0).sum() / mask[j].sum().clamp_min(1.0))
         return torch.stack(out)

@@ -6,6 +6,10 @@ context ``xi_t``, reward ``r_{t+1}``, the target frame/clip of that step and boo
 flags. When an episode ends an extra *terminal* row is written that holds ``s_{T+1}``
 (no transition out of it) and the termination label of that state, so k-step windows
 can use it as their last target state and the termination head gets positive labels.
+
+A window may also end early at its episode's terminal row (an episode shorter than the window, such as a
+failure right after a reset): the steps after it repeat the terminal state with a zero action and carry
+``mask`` 0, so the world model still learns the transitions that lead to quick failures.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ class WindowBatch:
     reward: torch.Tensor  # (k, n)
     done: torch.Tensor  # (k, n) termination label of states 1..k
     frame: torch.Tensor  # (k, n) target frame of each transition
+    mask: torch.Tensor | None = None  # (k, n) 1 for real transitions, 0 for padding after the terminal row
 
 
 @dataclass
@@ -96,15 +101,19 @@ class ReplayBuffer:
         return torch.roll(x, shifts=-j, dims=1) if j else x
 
     @torch.no_grad()
-    def window_mask(self, k: int) -> torch.Tensor:
-        """(E,T) True where rows t..t+k are valid, same episode, and t..t+k-1 are non-terminal."""
+    def window_mask(self, k: int, allow_short: bool = False) -> torch.Tensor:
+        """(E,T) True where rows t..t+k are valid, same episode, and t..t+k-1 are non-terminal; with
+        ``allow_short`` also where the episode's terminal row comes earlier, at t+1..t+k-1."""
         ok = self.valid & ~self.terminal
         ep0 = self.ep_id
+        ended = torch.zeros_like(ok)
         for j in range(1, k + 1):
             v = self._rolled(self.valid, j) & (self._rolled(ep0, j) == ep0)
-            if j < k:
+            term_j = v & self._rolled(self.terminal, j)
+            if j < k and not allow_short:
                 v &= ~self._rolled(self.terminal, j)
-            ok &= v
+            ok &= v | ended
+            ended |= term_j
         # The row currently under the write pointer may be overwritten next; the rolled window must not
         # wrap across the write pointer. Rows t with t + k crossing ptr are excluded by the ep_id test
         # (new rows carry a newer ep_id) except for same-episode wraps, which are rare; exclude explicitly.
@@ -123,19 +132,32 @@ class ReplayBuffer:
         return idx // self.T, idx % self.T
 
     @torch.no_grad()
-    def sample_windows(self, n: int, k: int) -> WindowBatch:
-        e, t = self._sample_from_mask(self.window_mask(k), n)
+    def sample_windows(self, n: int, k: int, allow_short: bool = False) -> WindowBatch:
+        e, t = self._sample_from_mask(self.window_mask(k, allow_short), n)
         offs = torch.arange(k + 1, device=self.device)
         tt = (t[None, :] + offs[:, None]) % self.T  # (k+1, n)
         ee = e[None, :].expand(k + 1, n)
+        if allow_short:
+            # Row j is real while no earlier row of the window is terminal; later rows repeat the terminal row.
+            term = self.terminal[ee, tt]
+            before = torch.cumsum(term.long(), 0) - term.long()  # terminal rows strictly before row j
+            real = before == 0  # (k+1, n)
+            last = real.long().sum(0) - 1  # index of the last real row
+            tt = torch.where(real, tt, tt[last, torch.arange(n, device=self.device)][None, :])
+            mask = real[1:].float()  # transition j is real when its target row j+1 is
+        a_exec = self.a_exec[ee[:-1], tt[:-1]]
+        a_clean = self.a[ee[:-1], tt[:-1]]
+        if allow_short:
+            a_exec, a_clean = a_exec * mask[..., None], a_clean * mask[..., None]
         return WindowBatch(
             states=self.s[ee, tt],
-            a_exec=self.a_exec[ee[:-1], tt[:-1]],
-            a_clean=self.a[ee[:-1], tt[:-1]],
+            a_exec=a_exec,
+            a_clean=a_clean,
             xi=self.xi[e, t],
             reward=self.r[ee[:-1], tt[:-1]],
             done=self.done[ee[1:], tt[1:]],
             frame=self.frame[ee[:-1], tt[:-1]],
+            mask=mask if allow_short else None,
         )
 
     @torch.no_grad()

@@ -52,6 +52,33 @@ def test_state_spec_identity_and_errors():
     np.testing.assert_allclose(s3[:, JP].numpy(), (s[:, JP] + 0.02 * s[:, JV]).numpy(), atol=1e-12)
 
 
+def test_short_windows_reach_quick_failures():
+    """Episodes shorter than the window are sampled with ``allow_short``, padded with their terminal row."""
+    from supermimic.data.replay_buffer import ReplayBuffer
+
+    b = ReplayBuffer(1, 40, 1, 1, 1, "cpu")
+    row, one = 0, torch.tensor([0])
+    for L in (2, 12, 1, 5):  # transitions per episode; each ends with a terminal row
+        for i in range(L + 1):
+            term = i == L
+            b.add(one, torch.tensor([[float(row)]]), torch.ones(1, 1), torch.ones(1, 1), torch.zeros(1, 1), torch.zeros(1),
+                  torch.tensor([float(term)]), torch.tensor([i]), one, torch.tensor([term]), torch.tensor([i == 0]))
+            row += 1
+        b.end_episode(one)
+    k = 4
+    assert b.window_mask(k).nonzero()[:, 1].tolist() == [3, 4, 5, 6, 7, 8, 9, 10, 11, 18, 19]
+    short = b.window_mask(k, True).nonzero()[:, 1].tolist()
+    assert {0, 1, 12, 13, 14, 16} <= set(short) and not {2, 15, 17} & set(short)
+    w = b.sample_windows(400, k, True)
+    starts = w.states[0, :, 0].long()
+    i0 = (starts == 0).nonzero()[0, 0]
+    assert w.states[:, i0, 0].tolist() == [0.0, 1.0, 2.0, 2.0, 2.0]
+    assert w.mask[:, i0].tolist() == [1.0, 1.0, 0.0, 0.0] and w.a_exec[:, i0, 0].tolist() == [1.0, 1.0, 0.0, 0.0]
+    assert w.done[1, i0] == 1.0
+    full = starts == 5
+    assert (w.mask[:, full] == 1).all()
+
+
 @pytest.mark.skipif(not torch.cuda.is_available() or not NPZ.exists(), reason="needs CUDA + the sweep npz")
 def test_world_model_overfits_replay_windows():
     """Collect a little data with a random policy, fit the WM for a few hundred steps: error must drop a lot."""
