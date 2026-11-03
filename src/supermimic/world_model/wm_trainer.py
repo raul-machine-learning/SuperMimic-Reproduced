@@ -27,7 +27,7 @@ class WMTrainerCfg:
 def reference_at(lib: MotionLibrary, frame: torch.Tensor) -> ReferenceFrame:
     r = lib.ref(frame)
     b = lib.bodies(frame)
-    return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w)
+    return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w, r.joint_pos)
 
 
 class WorldModelTrainer:

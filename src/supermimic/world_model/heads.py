@@ -16,26 +16,27 @@ import torch
 from supermimic.envs.mdp.rewards import TrackingRewardCfg, tracking_reward_terms
 from supermimic.kinematics.g1_fk import G1Kinematics
 from supermimic.kinematics.rotations import projected_gravity, quat_apply_inverse
+from supermimic.robots import ROBOT
 
-OBS_DIM = 93
+OBS_DIM = ROBOT.obs_frame_dim  # 93 for the G1
 # Term layout of the ``policy`` observation group (order matters: term-major history).
-OBS_TERMS = (("joint_pos", 29), ("joint_vel", 29), ("base_ang_vel", 3), ("projected_gravity", 3), ("actions", 29))
+OBS_TERMS = (("joint_pos", ROBOT.nj), ("joint_vel", ROBOT.nj), ("base_ang_vel", 3), ("projected_gravity", 3), ("actions", ROBOT.na))
 
 
 def split_state(s: torch.Tensor):
-    """-> root_pos (…,3), root_quat (…,4), joint_pos (…,29), root_lin_vel_w (…,3), root_ang_vel_b (…,3), joint_vel (…,29)."""
-    return s[..., 0:3], s[..., 3:7], s[..., 7:36], s[..., 36:39], s[..., 39:42], s[..., 42:71]
+    """-> root_pos (…,3), root_quat (…,4), joint_pos (…,NJ), root_lin_vel_w (…,3), root_ang_vel_b (…,3), joint_vel (…,NJ)."""
+    return ROBOT.split_state(s)
 
 
 def analytic_observation(
     s: torch.Tensor, prev_action: torch.Tensor, xi: torch.Tensor, default_joint_pos: torch.Tensor
 ) -> torch.Tensor:
-    """Noise-free 93-d proprioceptive observation (paper Table A.1) from state + context.
+    """Noise-free proprioceptive observation (paper Table A.1, 93-d for the G1) from state + context.
 
-    xi[..., 1:30] is the encoder bias: observed joint positions are ``q + bias - q0``.
+    xi[..., 1:1+NJ] is the encoder bias: observed joint positions are ``q + bias - q0``.
     """
     _, root_quat, q, _, ang_b, qd = split_state(s)
-    bias = xi[..., 1:30]
+    bias = xi[..., 1 : 1 + ROBOT.nj]
     return torch.cat([q + bias - default_joint_pos, qd, ang_b, projected_gravity(root_quat), prev_action], dim=-1)
 
 
@@ -55,7 +56,7 @@ ANCHOR_OBS_DIM = 9
 
 
 def flatten_history_term_major(hist: torch.Tensor) -> torch.Tensor:
-    """(H, N, 93) oldest→newest  ->  (N, 930) in mjlab's term-major layout [A_t0..A_tH-1, B_t0..]."""
+    """(H, N, OBS_DIM) oldest→newest  ->  (N, H*OBS_DIM) in mjlab's term-major layout [A_t0..A_tH-1, B_t0..]."""
     H, N, _ = hist.shape
     chunks = []
     start = 0
@@ -75,6 +76,7 @@ class ReferenceFrame:
     body_ang_vel_w: torch.Tensor  # (N, B, 3)
     root_pos_w: torch.Tensor  # (N, 3)
     root_quat_w: torch.Tensor  # (N, 4)
+    joint_pos: torch.Tensor | None = None  # (N, NJ); needed by the hand reward only
 
 
 class AnalyticHeads:
@@ -90,16 +92,20 @@ class AnalyticHeads:
         default_joint_pos: torch.Tensor,
         reward_cfg: TrackingRewardCfg | None = None,
     ):
+        """``soft_limits``: (NJ, 2) for every hinge; only ``ROBOT.limit_joint_names`` are penalised."""
         self.fk = fk
         self.tracked_idx = fk.body_indices(tracked_body_names)
         self.anchor_index = tracked_body_names.index(anchor_body_name)
         self.root_fk_index = fk.body_index(root_body_name)
-        self.soft_limits = soft_limits
+        dev = soft_limits.device
+        self.limit_idx = torch.tensor(ROBOT.joint_indices(ROBOT.limit_joint_names), device=dev)
+        self.soft_limits = soft_limits[self.limit_idx]
+        self.hand_idx = torch.tensor(ROBOT.joint_indices(ROBOT.hand_joint_names), device=dev) if ROBOT.hand_joint_names else None
         self.default_joint_pos = default_joint_pos
         self.reward_cfg = reward_cfg or TrackingRewardCfg()
 
     def robot_bodies(self, s: torch.Tensor) -> dict[str, torch.Tensor]:
-        out = self.fk(s[..., :36], s[..., 36:])
+        out = self.fk(s[..., : ROBOT.nq], s[..., ROBOT.nq :])
         idx = self.tracked_idx
         return {
             "pos": out["pos"][..., idx, :],
@@ -113,6 +119,10 @@ class AnalyticHeads:
     def reward(self, s_next: torch.Tensor, action: torch.Tensor, prev_action: torch.Tensor, ref: ReferenceFrame, bodies=None):
         """Reward r_{t+1} of reaching s_next (= s_{t+1}) under target frame g_t. Returns dict with 'total'."""
         b = bodies if bodies is not None else self.robot_bodies(s_next)
+        q = split_state(s_next)[2]
+        hand = ref_hand = None
+        if self.hand_idx is not None:
+            hand, ref_hand = q[..., self.hand_idx], ref.joint_pos[..., self.hand_idx]
         return tracking_reward_terms(
             robot_body_pos_w=b["pos"],
             robot_body_quat_w=b["quat"],
@@ -125,9 +135,11 @@ class AnalyticHeads:
             anchor_index=self.anchor_index,
             action=action,
             prev_action=prev_action,
-            joint_pos=s_next[..., 7:36],
+            joint_pos=q[..., self.limit_idx],
             soft_limits=self.soft_limits,
             cfg=self.reward_cfg,
+            hand_joint_pos=hand,
+            ref_hand_joint_pos=ref_hand,
         )
 
     @staticmethod

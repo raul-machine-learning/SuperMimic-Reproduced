@@ -16,7 +16,9 @@ from pathlib import Path
 import torch
 
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
+from supermimic.envs.mdp.rewards import TrackingRewardCfg
 from supermimic.policy.nets import Policy, PolicyCfg
+from supermimic.robots import ROBOT
 
 
 @dataclass
@@ -32,6 +34,8 @@ class ClipResult:
 
 def load_policy_from_checkpoint(path: str | Path, device: str) -> tuple[Policy, dict]:
     ck = torch.load(path, map_location=device, weights_only=False)
+    robot = ck.get("robot", "g1")
+    assert robot == ROBOT.name, f"{path} is a {robot!r} policy but SM_ROBOT selects {ROBOT.name!r}"
     pc = ck["config"]["policy"]
     pcfg = PolicyCfg(**{k: (tuple(v) if isinstance(v, list) else v) for k, v in pc.items()})
     policy = Policy(pcfg).to(device)
@@ -62,7 +66,7 @@ def run_benchmark(policy: Policy, npz_files: list[str], device: str = "cuda:0", 
         cmd = env.command_manager.get_term("motion")
         lib = cmd.library
         n_clips = lib.num_clips
-        max_r = 0.1  # paper reward upper bound per step (dt * 5)
+        max_r = TrackingRewardCfg().max_step_reward  # paper reward upper bound per step (G1: dt * 5)
 
         # Clip queue: env e plays clips e, e+N, e+2N, ...
         current = torch.arange(num_envs, device=device)

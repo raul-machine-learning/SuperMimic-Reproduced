@@ -1,5 +1,7 @@
 """State representation for the world model (plan D1–D3).
 
+Sizes below are for the G1 (NJ = 29 hinges); other robots (``supermimic.robots``) substitute their NJ.
+
 Simulator state  s = [root_pos(3), root_quat wxyz(4), joint_pos(29), root_lin_vel_w(3),
                       root_ang_vel_b(3), joint_vel(29)]            (71, MuJoCo layout, origin-free)
 
@@ -36,11 +38,12 @@ from supermimic.kinematics.rotations import (
     rot6d_from_quat,
     rotvec_from_quat,
 )
+from supermimic.robots import ROBOT
 
-STATE_DIM = 71
-FEAT_DIM = 71
-DELTA_DIM = 70
-NJ = 29
+STATE_DIM = ROBOT.state_dim
+FEAT_DIM = ROBOT.state_dim
+DELTA_DIM = ROBOT.delta_dim
+NJ = ROBOT.nj
 
 
 @dataclass
@@ -54,8 +57,8 @@ class StateSpecCfg:
     in_scale: tuple[float, ...] = (1.0, 1.0, 1.0, 2.0, 1.0, 5.0)
     explicit_integration: bool = True
     # xi normalisation: (offset, scale) for friction, encoder bias, com offset.
-    xi_offset: tuple[float, ...] = field(default_factory=lambda: (0.75,) + (0.0,) * 29 + (0.0,) * 3)
-    xi_scale: tuple[float, ...] = field(default_factory=lambda: (0.45,) + (0.01,) * 29 + (0.05,) * 3)
+    xi_offset: tuple[float, ...] = field(default_factory=lambda: (0.75,) + (0.0,) * NJ + (0.0,) * 3)
+    xi_scale: tuple[float, ...] = field(default_factory=lambda: (0.45,) + (0.01,) * NJ + (0.05,) * 3)
 
 
 class StateSpec:
@@ -73,7 +76,7 @@ class StateSpec:
 
     @staticmethod
     def split(s: torch.Tensor):
-        return s[..., 0:3], s[..., 3:7], s[..., 7:36], s[..., 36:39], s[..., 39:42], s[..., 42:71]
+        return ROBOT.split_state(s)
 
     def canonical(self, s: torch.Tensor) -> torch.Tensor:
         """Heading-invariant, scaled network input features (…, 71)."""
@@ -93,7 +96,9 @@ class StateSpec:
     def integrate(self, s: torch.Tensor, delta: torch.Tensor) -> torch.Tensor:
         """Apply the (unscaled) network output ``delta`` (…, 70) to state ``s`` (…, 71)."""
         d = delta * self.out_scale
-        dv_h, dw_b, dqd, dp_h, dth_b, dq = d[..., 0:3], d[..., 3:6], d[..., 6:35], d[..., 35:38], d[..., 38:41], d[..., 41:70]
+        n = NJ
+        dv_h, dw_b, dqd = d[..., 0:3], d[..., 3:6], d[..., 6 : 6 + n]
+        dp_h, dth_b, dq = d[..., 6 + n : 9 + n], d[..., 9 + n : 12 + n], d[..., 12 + n : 12 + 2 * n]
         p, q, qj, v, w, qd = self.split(s)
         q = quat_normalize(q)
         hq = heading_quat(q)

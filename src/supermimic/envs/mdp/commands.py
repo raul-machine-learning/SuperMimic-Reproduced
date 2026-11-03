@@ -4,7 +4,7 @@ Exposes the same attribute API as mjlab's ``MotionCommand`` (``anchor_pos_w``,
 ``robot_body_pos_w``, ``body_pos_relative_w`` ...) so mjlab's tracking reward
 functions work unchanged, plus:
 
-* ``goal``        (N, K*68) future-frame goal features (plan D5)
+* ``goal``        (N, K*GOAL_FEAT_DIM) future-frame goal features (plan D5)
 * ``root_*``      reference pelvis quantities for the paper's root terminations
 * ``clip_end``    (N,) True once the clip's last frame has been reached (time-out)
 * return-based reset sampling over 1 s bins of the whole library (plan D14)
@@ -29,6 +29,7 @@ from mjlab.utils.lab_api.math import (
 )
 
 from supermimic.envs.mdp.motion_library import MotionLibrary
+from supermimic.robots import ROBOT
 
 if TYPE_CHECKING:
     from mjlab.entity import Entity
@@ -49,6 +50,11 @@ class MultiClipMotionCommand(CommandTerm):
             self.robot.find_bodies(cfg.body_names, preserve_order=True)[0], dtype=torch.long, device=self.device
         )
         self.robot_root_body_index = self.robot.body_names.index(cfg.root_body_name)
+        assert tuple(self.robot.joint_names) == ROBOT.joint_names, "entity joint order differs from supermimic.robots"
+        # Mimic followers are re-driven after reset noise / limit clipping so the joint equalities hold.
+        self._mimic_follower = torch.tensor(ROBOT.joint_indices(tuple(m[0] for m in ROBOT.mimic)), dtype=torch.long, device=self.device)
+        self._mimic_driver = torch.tensor(ROBOT.joint_indices(tuple(m[1] for m in ROBOT.mimic)), dtype=torch.long, device=self.device)
+        self._mimic_mult = torch.tensor([m[2] for m in ROBOT.mimic], device=self.device)
 
         default_joint_pos = self.robot.data.default_joint_pos[0].detach()
         self.library = MotionLibrary(
@@ -276,6 +282,10 @@ class MultiClipMotionCommand(CommandTerm):
     def _write_reference_state_to_sim(self, env_ids, root_pos, root_ori, root_lin_vel, root_ang_vel, joint_pos, joint_vel):
         soft_limits = self.robot.data.soft_joint_pos_limits[env_ids]
         joint_pos = torch.clip(joint_pos, soft_limits[:, :, 0], soft_limits[:, :, 1])
+        if self._mimic_follower.numel():
+            joint_pos, joint_vel = joint_pos.clone(), joint_vel.clone()
+            joint_pos[:, self._mimic_follower] = self._mimic_mult * joint_pos[:, self._mimic_driver]
+            joint_vel[:, self._mimic_follower] = self._mimic_mult * joint_vel[:, self._mimic_driver]
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
         root_state = torch.cat([root_pos, root_ori, root_lin_vel, root_ang_vel], dim=-1)
         self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)

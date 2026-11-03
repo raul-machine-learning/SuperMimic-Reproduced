@@ -18,6 +18,7 @@ import tyro
 
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp.motion_library import discover_npz
+from supermimic.envs.mdp.rewards import TrackingRewardCfg
 from supermimic.envs.state_io import NQ, StateIO
 from supermimic.eval.benchmark import load_policy_from_checkpoint
 
@@ -43,7 +44,7 @@ def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed
         cmd.forced_frame[:] = lib.clip_start[env_clip]
         obs, _ = env.reset()
         cmd.forced_frame[:] = lib.clip_start[env_clip]  # keep the clip if an env is reset again
-        max_r = 0.1  # paper reward upper bound per step (dt * 5)
+        max_r = TrackingRewardCfg().max_step_reward  # paper reward upper bound per step (G1: dt * 5)
         rob, ref = [], []
         alive = torch.ones(n, dtype=torch.bool, device=device)
         rew_sum = torch.zeros(n, device=device)

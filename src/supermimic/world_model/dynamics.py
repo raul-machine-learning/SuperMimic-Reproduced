@@ -29,10 +29,17 @@ class MLP(nn.Module):
 
 
 class DynamicsMLP(nn.Module):
-    """delta = f(canonical(s), a, xi_norm) -> (…, 70). Zero-initialised last layer (identity dynamics at init)."""
+    """delta = f(canonical(s), a, xi_norm) -> (…, DELTA_DIM). Zero-initialised last layer (identity dynamics at init).
+    Default sizes are the active robot's (G1: 71 + 29 + 33 -> 70)."""
 
-    def __init__(self, feat_dim: int = 71, act_dim: int = 29, xi_dim: int = 33, hidden=(2048, 2048, 2048), out_dim: int = 70):
+    def __init__(self, feat_dim: int | None = None, act_dim: int | None = None, xi_dim: int | None = None, hidden=(2048, 2048, 2048), out_dim: int | None = None):
         super().__init__()
+        from supermimic.robots import ROBOT
+
+        feat_dim = feat_dim or ROBOT.state_dim
+        act_dim = act_dim or ROBOT.na
+        xi_dim = xi_dim or ROBOT.xi_dim
+        out_dim = out_dim or ROBOT.delta_dim
         self.mlp = MLP(feat_dim + act_dim + xi_dim, tuple(hidden), out_dim, zero_last=True)
 
     def forward(self, feat: torch.Tensor, action: torch.Tensor, xi_norm: torch.Tensor) -> torch.Tensor:

@@ -1,13 +1,10 @@
 """GAE targets, policy objective, and a short end-to-end training smoke run."""
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 import torch
 
-ROOT = Path(__file__).resolve().parents[1]
-NPZ = ROOT / "data/npz/lafan1"
+from sweep_data import CLIP_NAME, NPZ, NPZ_DIR
 
 
 def test_gae_targets_match_hand_computation():
@@ -30,13 +27,14 @@ def test_gae_targets_match_hand_computation():
     np.testing.assert_allclose(out1[0].numpy(), mc.numpy(), atol=1e-6)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available() or not NPZ.exists(), reason="needs CUDA + LAFAN1 npz")
+@pytest.mark.skipif(not torch.cuda.is_available() or not NPZ.exists(), reason="needs CUDA + the sweep npz")
 def test_training_smoke(tmp_path):
     from supermimic.config import TrainConfig
     from supermimic.training.loop import Trainer
 
     cfg = TrainConfig(run_name="smoke", log_root=tmp_path, seed=1)
-    cfg.data.clips = ["walk1_subject1"]
+    cfg.data.npz_dir = NPZ_DIR
+    cfg.data.clips = [CLIP_NAME]
     cfg.env.num_envs = 128
     cfg.env.replay_capacity = 200
     cfg.world_model.hidden = (256, 256)

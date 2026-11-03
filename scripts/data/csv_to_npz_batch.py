@@ -26,9 +26,9 @@ def _init_worker() -> None:
     global _MODEL
     # Keep BLAS single-threaded inside workers.
     os.environ.setdefault("OMP_NUM_THREADS", "1")
-    from supermimic.data.motion_convert import load_g1_model
+    from supermimic.data.motion_convert import load_robot_model
 
-    _MODEL = load_g1_model()
+    _MODEL = load_robot_model()
 
 
 def _convert_one(args: tuple[str, str, float, float]) -> dict:

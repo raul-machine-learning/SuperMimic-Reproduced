@@ -1,17 +1,15 @@
 """Analytic reward / observation / termination must match mjlab's env computations (plan 2.8, 2.9)."""
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 import torch
 
-ROOT = Path(__file__).resolve().parents[1]
-NPZ = ROOT / "data/npz/lafan1"
-pytestmark = [
-    pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"),
-    pytest.mark.skipif(not NPZ.exists(), reason="LAFAN1 npz not built"),
-]
+from sweep_data import requires_sweep, sweep_files
+
+from supermimic.robots import ROBOT
+
+pytestmark = [pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"), requires_sweep]
+NJ, NA = ROBOT.nj, ROBOT.na
 
 
 @pytest.fixture(scope="module")
@@ -19,20 +17,18 @@ def setup():
     torch.backends.cuda.matmul.allow_tf32 = False
     from mjlab.tasks.tracking import mdp as track_mdp
 
-    from supermimic.data.motion_convert import load_g1_model
+    from supermimic.data.motion_convert import load_robot_model
     from supermimic.envs import SuperMimicEnvCfgArgs, make_env
-    from supermimic.envs.mdp.motion_library import discover_npz
     from supermimic.envs.state_io import StateIO
     from supermimic.envs.tracking_env_cfg import ANCHOR_BODY, ROOT_BODY, TRACKED_BODIES
     from supermimic.kinematics.g1_fk import G1Kinematics
     from supermimic.world_model.heads import AnalyticHeads
 
-    files = discover_npz(NPZ, names=["walk1_subject1", "fight1_subject2"])
-    args = SuperMimicEnvCfgArgs(npz_files=[str(f) for f in files], num_envs=16, replay_capacity=64, obs_noise=False, seed=3)
+    args = SuperMimicEnvCfgArgs(npz_files=sweep_files(2), num_envs=16, replay_capacity=64, obs_noise=False, seed=3)
     env = make_env(args, device="cuda:0")
     torch.backends.cuda.matmul.allow_tf32 = False  # make_env turns TF32 on; keep the comparison exact
     robot = env.scene["robot"]
-    fk = G1Kinematics(load_g1_model(), device=env.device, dtype=torch.float32)
+    fk = G1Kinematics(load_robot_model(), device=env.device, dtype=torch.float32)
     heads = AnalyticHeads(
         fk,
         TRACKED_BODIES,
@@ -52,7 +48,7 @@ def _ref_from_command(cmd):
     return ReferenceFrame(
         body_pos_w=lib.body_pos_w[f], body_quat_w=lib.body_quat_w[f],
         body_lin_vel_w=lib.body_lin_vel_w[f], body_ang_vel_w=lib.body_ang_vel_w[f],
-        root_pos_w=lib.root_pos_w[f], root_quat_w=lib.root_quat_w[f],
+        root_pos_w=lib.root_pos_w[f], root_quat_w=lib.root_quat_w[f], joint_pos=lib.joint_pos[f],
     )
 
 
@@ -61,16 +57,18 @@ def test_reward_terms_match_mjlab(setup):
     from mjlab.envs import mdp as base_mdp
     from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+    from supermimic.envs.mdp.rewards import motion_hand_joint_position_error_exp
+
     env.reset()
     cmd = env.command_manager.get_term("motion")
     worst = {}
     for step in range(25):
-        act = 0.5 * torch.randn(env.num_envs, 29, device=env.device)
+        act = 0.5 * torch.randn(env.num_envs, NA, device=env.device)
         env.step(act)
         # Post-step: sim.forward() has run and the command advanced; evaluate both on this instant.
         s = io.read()
         ours = heads.reward(s, env.action_manager.action, env.action_manager.prev_action, _ref_from_command(cmd))
-        asset_cfg = SceneEntityCfg("robot", joint_names=(".*",))
+        asset_cfg = SceneEntityCfg("robot", joint_names=ROBOT.limit_joint_names)
         asset_cfg.resolve(env.scene)
         theirs = {
             "motion_global_root_pos": 0.5 * mdp.motion_global_anchor_position_error_exp(env, "motion", 0.3),
@@ -82,6 +80,10 @@ def test_reward_terms_match_mjlab(setup):
             "action_rate_l2": -0.1 * base_mdp.action_rate_l2(env),
             "joint_limit": -2.0 * base_mdp.joint_pos_limits(env, asset_cfg),
         }
+        if ROBOT.hand_joint_names:
+            hand_ids = ROBOT.joint_indices(ROBOT.hand_joint_names)
+            theirs["motion_hand_joint_pos"] = motion_hand_joint_position_error_exp(env, "motion", 0.3, hand_ids)
+        assert set(theirs) == set(ours) - {"total"}
         for k, v in theirs.items():
             d = (ours[k] / 0.02 - v).abs().max().item()
             worst[k] = max(worst.get(k, 0.0), d)
@@ -93,12 +95,15 @@ def test_observation_head_matches_env(setup):
     env, heads, io, robot = setup["env"], setup["heads"], setup["io"], setup["robot"]
     from supermimic.world_model.heads import analytic_observation, flatten_history_term_major
 
+    cmd = env.command_manager.get_term("motion")
+    cmd.forced_frame[:] = cmd.library.clip_start[0]  # far from the clip end: no time-out within the rollout
     obs, _ = env.reset()
+    cmd.forced_frame[:] = -1
     rec = env.recorder_manager.get_term("replay")
     q0 = robot.data.default_joint_pos[0]
     hist = []
     for step in range(14):
-        act = 0.5 * torch.randn(env.num_envs, 29, device=env.device)
+        act = 0.2 * torch.randn(env.num_envs, NA, device=env.device)
         obs, *_ = env.step(act)
         if env.reset_buf.any():
             pytest.skip("an env reset during the short rollout; rerun")  # keeps the test simple and exact
@@ -108,7 +113,7 @@ def test_observation_head_matches_env(setup):
         newest = obs["policy"].view(env.num_envs, -1)
         # Newest frame of each term in the term-major layout.
         start = 0
-        for name, d in (("joint_pos", 29), ("joint_vel", 29), ("base_ang_vel", 3), ("projected_gravity", 3), ("actions", 29)):
+        for name, d in (("joint_pos", NJ), ("joint_vel", NJ), ("base_ang_vel", 3), ("projected_gravity", 3), ("actions", NA)):
             block = newest[:, start * 10 : (start + d) * 10].reshape(env.num_envs, 10, d)  # time-major inside a term
             env_newest = block[:, -1, :]
             our = o[:, start : start + d]
@@ -125,7 +130,7 @@ def test_termination_matches_env(setup):
     env.reset()
     cmd = env.command_manager.get_term("motion")
     for _ in range(10):
-        env.step(1.0 * torch.randn(env.num_envs, 29, device=env.device))
+        env.step(1.0 * torch.randn(env.num_envs, NA, device=env.device))
         s = io.read()
         ref = _ref_from_command(cmd)
         b = heads.robot_bodies(s)
@@ -141,31 +146,30 @@ def test_termination_matches_env(setup):
 
 def test_anchor_relative_obs_matches_env():
     """The analytic anchor-relative term (from state via FK) equals mjlab's observation terms."""
-    from supermimic.data.motion_convert import load_g1_model
+    from supermimic.data.motion_convert import load_robot_model
     from supermimic.envs import SuperMimicEnvCfgArgs, make_env
-    from supermimic.envs.mdp.motion_library import discover_npz
+    from supermimic.envs.mdp.motion_library import GOAL_FEAT_DIM
     from supermimic.envs.state_io import StateIO
     from supermimic.envs.tracking_env_cfg import ANCHOR_BODY, ROOT_BODY, TRACKED_BODIES
     from supermimic.kinematics.g1_fk import G1Kinematics
     from supermimic.world_model.heads import AnalyticHeads, anchor_relative_obs
 
-    files = discover_npz(NPZ, names=["walk1_subject1"])
-    env = make_env(SuperMimicEnvCfgArgs(npz_files=[str(f) for f in files], num_envs=8, obs_noise=False, anchor_obs=True, record_transitions=False, seed=4), "cuda:0")
+    env = make_env(SuperMimicEnvCfgArgs(npz_files=sweep_files(), num_envs=8, obs_noise=False, anchor_obs=True, record_transitions=False, seed=4), "cuda:0")
     torch.backends.cuda.matmul.allow_tf32 = False
     try:
         robot = env.scene["robot"]
-        heads = AnalyticHeads(G1Kinematics(load_g1_model(), device=env.device), TRACKED_BODIES, ANCHOR_BODY, ROOT_BODY, robot.data.soft_joint_pos_limits[0].clone(), robot.data.default_joint_pos[0].clone())
+        heads = AnalyticHeads(G1Kinematics(load_robot_model(), device=env.device), TRACKED_BODIES, ANCHOR_BODY, ROOT_BODY, robot.data.soft_joint_pos_limits[0].clone(), robot.data.default_joint_pos[0].clone())
         io = StateIO(env)
         obs, _ = env.reset()
-        assert obs["goal"].shape == (8, 689)
+        assert obs["goal"].shape == (8, 10 * GOAL_FEAT_DIM + 9)
         cmd = env.command_manager.get_term("motion")
         for _ in range(5):
-            obs, *_ = env.step(0.3 * torch.randn(8, 29, device=env.device))
+            obs, *_ = env.step(0.3 * torch.randn(8, NA, device=env.device))
             s = io.read()
             b = heads.robot_bodies(s)
             ai = heads.anchor_index
             ref = _ref_from_command(cmd)
             ours = anchor_relative_obs(b["pos"][:, ai], b["quat"][:, ai], ref.body_pos_w[:, ai], ref.body_quat_w[:, ai])
-            np.testing.assert_allclose(ours.cpu().numpy(), obs["goal"][:, 680:].cpu().numpy(), atol=3e-5)
+            np.testing.assert_allclose(ours.cpu().numpy(), obs["goal"][:, 10 * GOAL_FEAT_DIM :].cpu().numpy(), atol=3e-5)
     finally:
         env.close()

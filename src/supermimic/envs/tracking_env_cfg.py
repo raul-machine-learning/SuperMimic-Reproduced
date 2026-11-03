@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mjlab.asset_zoo.robots import G1_ACTION_SCALE, get_g1_robot_cfg
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as base_mdp
 from mjlab.envs.mdp import dr
@@ -36,6 +35,8 @@ from supermimic.envs.actions import NoisyJointPositionActionCfg
 from supermimic.envs.mdp import observations as sm_obs
 from supermimic.envs.mdp import terminations as sm_term
 from supermimic.envs.mdp.commands import MultiClipMotionCommandCfg
+from supermimic.envs.mdp.rewards import TrackingRewardCfg, motion_hand_joint_position_error_exp
+from supermimic.robots import ROBOT
 
 class QuietSimulationCfg(SimulationCfg):
     """SimulationCfg that disables MuJoCo Warp's per-step overflow printf (a kernel build-time constant,
@@ -46,25 +47,10 @@ class QuietSimulationCfg(SimulationCfg):
         wp_opt.warn_overflow = 0
 
 
-TRACKED_BODIES = (
-    "pelvis",
-    "left_hip_roll_link",
-    "left_knee_link",
-    "left_ankle_roll_link",
-    "right_hip_roll_link",
-    "right_knee_link",
-    "right_ankle_roll_link",
-    "torso_link",
-    "left_shoulder_roll_link",
-    "left_elbow_link",
-    "left_wrist_yaw_link",
-    "right_shoulder_roll_link",
-    "right_elbow_link",
-    "right_wrist_yaw_link",
-)
-ANCHOR_BODY = "torso_link"
-ROOT_BODY = "pelvis"
-FOOT_GEOM_REGEX = r"^(left|right)_foot[1-7]_collision$"
+TRACKED_BODIES = ROBOT.tracked_bodies
+ANCHOR_BODY = ROBOT.anchor_body
+ROOT_BODY = ROBOT.root_body
+FOOT_GEOM_REGEX = ROBOT.foot_geom_regex
 
 
 @dataclass
@@ -132,7 +118,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         "joint_pos": NoisyJointPositionActionCfg(
             entity_name="robot",
             actuator_names=(".*",),
-            scale=G1_ACTION_SCALE,
+            scale=ROBOT.action_scale_fn(),
             use_default_offset=True,
             noise_std=a.action_noise_std,
         )
@@ -201,6 +187,8 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         )
 
     # ---------------------------------------------------------------- rewards (Table A.2)
+    # Fingers rest against their limits (open / closed hand), so only the body joints are penalised there.
+    limit_joints = (".*",) if ROBOT.limit_joint_names == ROBOT.joint_names else ROBOT.limit_joint_names
     rewards = {
         "motion_global_root_pos": RewardTermCfg(func=track_mdp.motion_global_anchor_position_error_exp, weight=0.5, params={"command_name": "motion", "std": 0.3}),
         "motion_global_root_ori": RewardTermCfg(func=track_mdp.motion_global_anchor_orientation_error_exp, weight=0.5, params={"command_name": "motion", "std": 0.4}),
@@ -209,8 +197,14 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         "motion_body_lin_vel": RewardTermCfg(func=track_mdp.motion_global_body_linear_velocity_error_exp, weight=1.0, params={"command_name": "motion", "std": 1.0}),
         "motion_body_ang_vel": RewardTermCfg(func=track_mdp.motion_global_body_angular_velocity_error_exp, weight=1.0, params={"command_name": "motion", "std": 3.14}),
         "action_rate_l2": RewardTermCfg(func=base_mdp.action_rate_l2, weight=-0.1),
-        "joint_limit": RewardTermCfg(func=base_mdp.joint_pos_limits, weight=a.joint_limit_weight, params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))}),
+        "joint_limit": RewardTermCfg(func=base_mdp.joint_pos_limits, weight=a.joint_limit_weight, params={"asset_cfg": SceneEntityCfg("robot", joint_names=limit_joints)}),
     }
+    if ROBOT.hand_joint_names:
+        rc = TrackingRewardCfg()
+        rewards["motion_hand_joint_pos"] = RewardTermCfg(
+            func=motion_hand_joint_position_error_exp, weight=rc.w_hand_joint_pos,
+            params={"command_name": "motion", "std": rc.std_hand_joint_pos, "joint_ids": ROBOT.joint_indices(ROBOT.hand_joint_names)},
+        )
 
     # ---------------------------------------------------------------- terminations
     terminations = {
@@ -225,7 +219,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         recorders["replay"] = ReplayRecorderCfg(params={"capacity": a.replay_capacity, "foot_geom_regex": FOOT_GEOM_REGEX, "com_body_name": "torso_link"})
 
     cfg = ManagerBasedRlEnvCfg(
-        scene=SceneCfg(terrain=TerrainEntityCfg(terrain_type="plane"), num_envs=a.num_envs, entities={"robot": get_g1_robot_cfg()}),
+        scene=SceneCfg(terrain=TerrainEntityCfg(terrain_type="plane"), num_envs=a.num_envs, entities={"robot": ROBOT.entity_cfg_fn()}),
         observations=observations,
         actions=actions,
         commands=commands,
@@ -234,7 +228,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         terminations=terminations,
         recorders=recorders,
         viewer=ViewerConfig(origin_type=ViewerConfig.OriginType.ASSET_BODY, entity_name="robot", body_name="torso_link", distance=2.8, fovy=55.0, elevation=-5.0, azimuth=120.0),
-        sim=QuietSimulationCfg(nconmax=35, njmax=250, mujoco=MujocoCfg(timestep=0.005, iterations=10, ls_iterations=20)),
+        sim=QuietSimulationCfg(nconmax=ROBOT.nconmax, njmax=ROBOT.njmax, mujoco=MujocoCfg(timestep=0.005, iterations=10, ls_iterations=20)),
         decimation=4,
         episode_length_s=a.episode_length_s,
         seed=a.seed,

@@ -1,12 +1,14 @@
-"""Read / write the full simulator state (qpos | qvel) as one 71-d tensor."""
+"""Read / write the full simulator state (qpos | qvel) as one tensor (71-d for the G1)."""
 
 from __future__ import annotations
 
 import torch
 
-STATE_DIM = 36 + 35
-NQ = 36
-NV = 35
+from supermimic.robots import ROBOT
+
+STATE_DIM = ROBOT.state_dim
+NQ = ROBOT.nq
+NV = ROBOT.nv
 
 
 class StateIO:
@@ -22,7 +24,7 @@ class StateIO:
         )
 
     def read(self) -> torch.Tensor:
-        """(N, 71) copy of [qpos | qvel]."""
+        """(N, STATE_DIM) copy of [qpos | qvel]."""
         # Index with [:] to get plain tensors out of mjlab's TorchArray proxies (torch.cat on the
         # proxies recurses inside their __torch_function__).
         s = torch.cat([self.sim.data.qpos[:], self.sim.data.qvel[:]], dim=-1).clone()

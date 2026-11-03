@@ -1,23 +1,23 @@
 """Compact (FK on the fly, fp16 store) library must reproduce the full library's goals and body states."""
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 import torch
 
-ROOT = Path(__file__).resolve().parents[1]
-NPZ = ROOT / "data/npz/lafan1"
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available() or not NPZ.exists(), reason="needs CUDA + LAFAN1 npz")
+from sweep_data import NPZ, sweep_files
+
+from supermimic.robots import ROBOT
+
+pytestmark = pytest.mark.skipif(not torch.cuda.is_available() or not NPZ.exists(), reason="needs CUDA + the sweep npz")
 
 
 def test_compact_matches_full():
     torch.backends.cuda.matmul.allow_tf32 = False
-    from supermimic.envs.mdp.motion_library import MotionLibrary, discover_npz
+    from supermimic.envs.mdp.motion_library import MotionLibrary
     from supermimic.envs.tracking_env_cfg import TRACKED_BODIES
 
-    files = discover_npz(NPZ, names=["walk1_subject1", "jumps1_subject1"])
-    q0 = torch.zeros(29)
+    files = sweep_files(2)
+    q0 = torch.zeros(ROBOT.nj)
     full = MotionLibrary(files, TRACKED_BODIES, q0, device="cuda", compact=False)
     comp32 = MotionLibrary(files, TRACKED_BODIES, q0, device="cuda", compact=True, store_dtype=torch.float32)
     comp16 = MotionLibrary(files, TRACKED_BODIES, q0, device="cuda", compact=True, store_dtype=torch.float16)

@@ -1,27 +1,23 @@
-"""Environment layer smoke test: build the env on a few LAFAN1 clips, step, inspect the replay."""
-
-from pathlib import Path
+"""Environment layer smoke test: build the env on the sweep clip (repeated), step, inspect the replay."""
 
 import numpy as np
 import pytest
 import torch
 
-ROOT = Path(__file__).resolve().parents[1]
-NPZ = ROOT / "data/npz/lafan1"
-pytestmark = [
-    pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"),
-    pytest.mark.skipif(not NPZ.exists(), reason="LAFAN1 npz not built"),
-]
+from sweep_data import requires_sweep, sweep_files
+
+from supermimic.envs.mdp.motion_library import GOAL_FEAT_DIM
+from supermimic.envs.mdp.rewards import TrackingRewardCfg
+from supermimic.robots import ROBOT
+
+pytestmark = [pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"), requires_sweep]
 
 
 @pytest.fixture(scope="module")
 def env():
     from supermimic.envs import SuperMimicEnvCfgArgs, make_env
-    from supermimic.envs.mdp.motion_library import discover_npz
 
-    files = discover_npz(NPZ, names=["walk1_subject1", "dance1_subject1", "jumps1_subject1"])
-    assert len(files) == 3
-    args = SuperMimicEnvCfgArgs(npz_files=[str(f) for f in files], num_envs=32, replay_capacity=64, seed=1)
+    args = SuperMimicEnvCfgArgs(npz_files=sweep_files(3), num_envs=32, replay_capacity=64, seed=1)
     e = make_env(args, device="cuda:0")
     yield e
     e.close()
@@ -29,16 +25,16 @@ def env():
 
 def test_spaces_and_step(env):
     obs, _ = env.reset()
-    assert obs["policy"].shape == (32, 930)
-    assert obs["goal"].shape == (32, 680)
-    assert env.action_manager.total_action_dim == 29
+    assert obs["policy"].shape == (32, 10 * ROBOT.obs_frame_dim)
+    assert obs["goal"].shape == (32, 10 * GOAL_FEAT_DIM)
+    assert env.action_manager.total_action_dim == ROBOT.na
     for _ in range(40):
-        act = 0.3 * torch.randn(32, 29, device=env.device)
+        act = 0.3 * torch.randn(32, ROBOT.na, device=env.device)
         obs, rew, term, tout, extras = env.step(act)
         assert torch.isfinite(obs["policy"]).all() and torch.isfinite(obs["goal"]).all()
         assert torch.isfinite(rew).all()
-    # Rewards are dt-scaled; the positive terms sum to at most 0.1 per step.
-    assert rew.max() <= 0.1 + 1e-6
+    # Rewards are dt-scaled; the positive terms sum to at most max_step_reward (G1: 0.1) per step.
+    assert rew.max() <= TrackingRewardCfg().max_step_reward + 1e-6
 
 
 def test_goal_matches_library(env):
@@ -47,11 +43,11 @@ def test_goal_matches_library(env):
     lib = cmd.library
     f = cmd.frame
     direct = lib.goal_feat[f]
-    np.testing.assert_allclose(goal[:, :68].cpu().numpy(), direct.cpu().numpy(), atol=1e-6)
+    np.testing.assert_allclose(goal[:, :GOAL_FEAT_DIM].cpu().numpy(), direct.cpu().numpy(), atol=1e-6)
     # Clamping at the clip end.
     last = lib.last_frame_of(f)
     k9 = torch.minimum(f + 9, last)
-    np.testing.assert_allclose(goal[:, 9 * 68 :].cpu().numpy(), lib.goal_feat[k9].cpu().numpy(), atol=1e-6)
+    np.testing.assert_allclose(goal[:, 9 * GOAL_FEAT_DIM :].cpu().numpy(), lib.goal_feat[k9].cpu().numpy(), atol=1e-6)
 
 
 def test_replay_rows_and_windows(env):
@@ -63,13 +59,13 @@ def test_replay_rows_and_windows(env):
     rows = [t for t in range(buf.T) if buf.valid[e, t]]
     assert len(rows) > 5
     w = buf.sample_windows(256, 8)
-    assert w.states.shape == (9, 256, 71) and w.a_exec.shape == (8, 256, 29) and w.xi.shape == (256, 33)
+    assert w.states.shape == (9, 256, ROBOT.state_dim) and w.a_exec.shape == (8, 256, ROBOT.na) and w.xi.shape == (256, ROBOT.xi_dim)
     assert torch.isfinite(w.states).all()
     # Executed action differs from the clean one by the injected noise only.
     d = (w.a_exec - w.a_clean).std().item()
     assert 0.05 < d < 0.2, d
     s = buf.sample_starts(128, hist=10)
-    assert s.hist_states.shape == (10, 128, 71) and s.hist_actions.shape == (10, 128, 29)
+    assert s.hist_states.shape == (10, 128, ROBOT.state_dim) and s.hist_actions.shape == (10, 128, ROBOT.na)
     assert torch.equal(s.hist_states[-1], s.state)
 
 
@@ -78,7 +74,7 @@ def test_state_io_round_trip(env):
 
     io = StateIO(env)
     s = io.read()
-    assert s.shape == (32, 71)
+    assert s.shape == (32, ROBOT.state_dim)
     ids = torch.arange(8, device=env.device)
     s2 = s[ids].clone()
     s2[:, 0] += 0.123
@@ -93,11 +89,12 @@ def test_state_io_round_trip(env):
 def test_sim_context(env):
     rec = env.recorder_manager.get_term("replay")
     xi = rec.ctx.read()
-    assert xi.shape == (32, 33)
+    nj = ROBOT.nj
+    assert xi.shape == (32, ROBOT.xi_dim)
     fr = xi[:, 0]
     assert (fr >= 0.3 - 1e-6).all() and (fr <= 1.2 + 1e-6).all()
-    assert xi[:, 1:30].abs().max() <= 0.01 + 1e-6
-    assert xi[:, 30:].abs().max() <= 0.05 + 1e-6
+    assert xi[:, 1 : 1 + nj].abs().max() <= 0.01 + 1e-6
+    assert xi[:, 1 + nj :].abs().max() <= 0.05 + 1e-6
     # Per-episode re-sampling: friction values should not all be identical across envs.
     assert fr.std() > 0.01
 
@@ -109,7 +106,7 @@ def test_episode_never_crosses_clip_boundary(env):
     env.reset()
     start_clip = lib.frame_clip[cmd.frame].clone()
     for _ in range(60):
-        env.step(torch.zeros(env.num_envs, 29, device=env.device))
+        env.step(torch.zeros(env.num_envs, ROBOT.na, device=env.device))
         same = lib.frame_clip[cmd.frame] == start_clip
         assert bool(same[~env.reset_buf].all())
         start_clip = lib.frame_clip[cmd.frame].clone()
@@ -121,6 +118,19 @@ def test_episode_never_crosses_clip_boundary(env):
     cmd.update_relative_body_poses()
     fired = False
     for _ in range(3):  # targets last-1 -> last -> (clip_end set) -> time-out on the next check
-        obs, rew, term, tout, _ = env.step(torch.zeros(env.num_envs, 29, device=env.device))
+        obs, rew, term, tout, _ = env.step(torch.zeros(env.num_envs, ROBOT.na, device=env.device))
         fired = fired or bool(tout[0]) or bool(term[0])
     assert fired
+
+
+@pytest.mark.skipif(not ROBOT.mimic, reason="robot has no mimic joints")
+def test_reset_keeps_mimic_couplings(env):
+    """Reset noise is drawn per joint; the followers must be re-driven so the joint equalities hold."""
+    robot = env.scene["robot"]
+    fol = ROBOT.joint_indices(tuple(m[0] for m in ROBOT.mimic))
+    drv = ROBOT.joint_indices(tuple(m[1] for m in ROBOT.mimic))
+    mult = torch.tensor([m[2] for m in ROBOT.mimic], device=env.device)
+    env.reset()
+    q, qd = robot.data.joint_pos, robot.data.joint_vel
+    np.testing.assert_allclose(q[:, fol].cpu().numpy(), (mult * q[:, drv]).cpu().numpy(), atol=1e-6)
+    np.testing.assert_allclose(qd[:, fol].cpu().numpy(), (mult * qd[:, drv]).cpu().numpy(), atol=1e-5)

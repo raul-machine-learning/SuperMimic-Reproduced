@@ -1,7 +1,5 @@
 """Resampler and CPU-FK conventions must match mjlab's csv_to_npz exactly."""
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -14,11 +12,9 @@ from supermimic.data.motion_convert import (
     resample_motion,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
-LAFAN = ROOT / "data/raw/lafan1/g1"
-CLIP = LAFAN / "walk1_subject1.csv"
+from sweep_data import G1_CSV as CLIP
 
-pytestmark = pytest.mark.skipif(not CLIP.exists(), reason="LAFAN1 G1 CSVs not downloaded")
+pytestmark = pytest.mark.skipif(not CLIP.exists(), reason="sweep G1 CSV not exported")
 
 
 def _signed_quat_close(q, q_ref, atol):
@@ -40,7 +36,7 @@ def test_resample_matches_mjlab_motion_loader():
     from mjlab.scripts.csv_to_npz import MotionLoader  # per-frame reference implementation
     from scipy.spatial.transform import Rotation, Slerp
 
-    n_rows = 400
+    n_rows = 400  # of 463
     ref = MotionLoader(str(CLIP), input_fps=30, output_fps=50, device="cpu", line_range=(1, n_rows))
     raw = load_csv(CLIP)[:n_rows]
     ours = resample_motion(raw, 30, 50)

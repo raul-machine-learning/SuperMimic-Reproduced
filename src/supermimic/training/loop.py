@@ -11,13 +11,14 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from supermimic.config import TrainConfig
-from supermimic.data.motion_convert import load_g1_model
+from supermimic.data.motion_convert import load_robot_model
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
-from supermimic.envs.mdp.motion_library import discover_npz
+from supermimic.envs.mdp.motion_library import GOAL_FEAT_DIM, discover_npz
 from supermimic.envs.tracking_env_cfg import ANCHOR_BODY, ROOT_BODY, TRACKED_BODIES
 from supermimic.imagination.policy_trainer import PolicyTrainer
 from supermimic.kinematics.g1_fk import G1Kinematics
 from supermimic.policy.nets import Critic, Policy
+from supermimic.robots import ROBOT
 from supermimic.training.distributed import allreduce_mean, broadcast_params, finalize, init_distributed, world_size
 from supermimic.training.schedule import cosine_lr
 from supermimic.world_model.heads import AnalyticHeads
@@ -28,7 +29,7 @@ from supermimic.world_model.world_model import WorldModel
 class Trainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
-        cfg.policy.goal_dim = cfg.env.future_frames * 68 + (9 if cfg.env.anchor_obs else 0)
+        cfg.policy.goal_dim = cfg.env.future_frames * GOAL_FEAT_DIM + (9 if cfg.env.anchor_obs else 0)
         cfg.policy_trainer.anchor_obs = cfg.env.anchor_obs
         self.rank, local_rank, self.world = init_distributed()
         self.is_main = self.rank == 0
@@ -78,7 +79,7 @@ class Trainer:
         self.buffer = self.recorder.buffer
         robot = env.scene["robot"]
 
-        fk = G1Kinematics(load_g1_model(), device=self.device)
+        fk = G1Kinematics(load_robot_model(), device=self.device)
         heads = AnalyticHeads(fk, TRACKED_BODIES, ANCHOR_BODY, ROOT_BODY, robot.data.soft_joint_pos_limits[0].clone(), robot.data.default_joint_pos[0].clone())
         self.wm = WorldModel(cfg.world_model, heads, self.device)
         self.policy = Policy(cfg.policy).to(self.device)
@@ -120,6 +121,7 @@ class Trainer:
                 "bin_return": self.command.bin_return,
                 "bin_memory": self.command.bin_memory,
                 "config": asdict(self.cfg),
+                "robot": ROBOT.name,
             },
             self.log_dir / name,
         )

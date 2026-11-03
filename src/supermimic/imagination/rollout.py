@@ -10,23 +10,24 @@ from supermimic.data.replay_buffer import StartBatch
 from supermimic.envs.mdp.motion_library import MotionLibrary
 from supermimic.imagination.compiled import REWARD_TERM_NAMES, ImagStep
 from supermimic.policy.nets import Policy
+from supermimic.robots import ROBOT
 from supermimic.world_model.heads import ReferenceFrame, analytic_observation, anchor_relative_obs, flatten_history_term_major
 from supermimic.world_model.wm_trainer import reference_at
 from supermimic.world_model.world_model import WorldModel
 
-# Paper Table A.1 sensor noise (uniform half-widths) in the 93-d observation order.
-OBS_NOISE_HALF = torch.tensor([0.01] * 29 + [0.5] * 29 + [0.2] * 3 + [0.05] * 3 + [0.0] * 29)
+# Paper Table A.1 sensor noise (uniform half-widths) in the observation order (93-d for the G1).
+OBS_NOISE_HALF = torch.tensor([0.01] * ROBOT.nj + [0.5] * ROBOT.nj + [0.2] * 3 + [0.05] * 3 + [0.0] * ROBOT.na)
 ANCHOR_NOISE_HALF = torch.tensor([0.25] * 3 + [0.05] * 6)
 
 
 @dataclass
 class ImagRollout:
-    states: torch.Tensor  # (H+1, n, 71)
-    actions: torch.Tensor  # (H, n, 29)
+    states: torch.Tensor  # (H+1, n, STATE_DIM)
+    actions: torch.Tensor  # (H, n, NA)
     rewards: torch.Tensor  # (H, n)      r_{t+1}
     dhat: torch.Tensor  # (H+1, n)    predicted termination prob of s_t (d_0 = 0)
     survival: torch.Tensor  # (H+1, n)    c_t
-    goals: torch.Tensor  # (H+1, n, 680)
+    goals: torch.Tensor  # (H+1, n, GOAL_DIM)
     e_root: torch.Tensor  # (H+1, n, 4)
     frames: torch.Tensor  # (H+1, n)
     reward_terms: dict  # mean of each reward term over the rollout (diagnostics)
@@ -83,7 +84,7 @@ def imagine(
 
     def ref_at(t):
         sl = slice(t * n, (t + 1) * n)
-        return ReferenceFrame(ref_all.body_pos_w[sl], ref_all.body_quat_w[sl], ref_all.body_lin_vel_w[sl], ref_all.body_ang_vel_w[sl], ref_all.root_pos_w[sl], ref_all.root_quat_w[sl])
+        return ReferenceFrame(ref_all.body_pos_w[sl], ref_all.body_quat_w[sl], ref_all.body_lin_vel_w[sl], ref_all.body_ang_vel_w[sl], ref_all.root_pos_w[sl], ref_all.root_quat_w[sl], ref_all.joint_pos[sl])
 
     ref = ref_at(0)
     if anchor_obs:

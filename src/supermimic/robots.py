@@ -1,0 +1,343 @@
+"""Robot variants and the sizes derived from them.
+
+* ``g1`` (default): mjlab's Unitree G1, 29 hinge joints, all actuated.
+* ``g1_inspire``: the same G1 with Inspire RH56 DFQ five-finger hands in place of the rubber hands. Each hand
+  has 12 hinge joints, 6 of them actuated (thumb yaw, thumb pitch, the proximal joint of each finger); the other
+  6 follow through the URDF ``<mimic>`` couplings, kept as MuJoCo joint equalities. 53 hinges, 41 actuators.
+
+The state, observation and goal layouts are sized by the number of hinge joints (``nj``), the action by the
+number of actuated joints (``na``). The active robot is fixed per process by the ``SM_ROBOT`` environment
+variable, since those sizes are module-level constants throughout the package.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable
+
+import mujoco
+
+if TYPE_CHECKING:
+    from mjlab.entity import EntityCfg
+
+ASSETS = Path(__file__).resolve().parent / "assets"
+
+G1_JOINT_NAMES: tuple[str, ...] = (
+    "left_hip_pitch_joint",
+    "left_hip_roll_joint",
+    "left_hip_yaw_joint",
+    "left_knee_joint",
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_hip_pitch_joint",
+    "right_hip_roll_joint",
+    "right_hip_yaw_joint",
+    "right_knee_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+    "waist_yaw_joint",
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_yaw_joint",
+)
+
+G1_TRACKED_BODIES: tuple[str, ...] = (
+    "pelvis",
+    "left_hip_roll_link",
+    "left_knee_link",
+    "left_ankle_roll_link",
+    "right_hip_roll_link",
+    "right_knee_link",
+    "right_ankle_roll_link",
+    "torso_link",
+    "left_shoulder_roll_link",
+    "left_elbow_link",
+    "left_wrist_yaw_link",
+    "right_shoulder_roll_link",
+    "right_elbow_link",
+    "right_wrist_yaw_link",
+)
+
+
+def _hand_joints(side: str) -> tuple[str, ...]:
+    """One hand's hinges in MuJoCo (depth-first) order."""
+    return tuple(
+        f"{side}_{n}_joint"
+        for n in (
+            "thumb_proximal_yaw", "thumb_proximal_pitch", "thumb_intermediate", "thumb_distal",
+            "index_proximal", "index_intermediate", "middle_proximal", "middle_intermediate",
+            "ring_proximal", "ring_intermediate", "pinky_proximal", "pinky_intermediate",
+        )
+    )
+
+
+# follower -> (driver, multiplier) of the URDF <mimic> couplings (offsets are all zero).
+INSPIRE_MIMIC: dict[str, tuple[str, float]] = {}
+for _s in "LR":
+    INSPIRE_MIMIC[f"{_s}_thumb_intermediate_joint"] = (f"{_s}_thumb_proximal_pitch_joint", 1.6)
+    INSPIRE_MIMIC[f"{_s}_thumb_distal_joint"] = (f"{_s}_thumb_proximal_pitch_joint", 2.4)
+    for _f in ("index", "middle", "ring", "pinky"):
+        INSPIRE_MIMIC[f"{_s}_{_f}_intermediate_joint"] = (f"{_s}_{_f}_proximal_joint", 1.0)
+
+_LW = G1_JOINT_NAMES.index("left_wrist_yaw_joint") + 1
+INSPIRE_JOINT_NAMES = G1_JOINT_NAMES[:_LW] + _hand_joints("L") + G1_JOINT_NAMES[_LW:] + _hand_joints("R")
+INSPIRE_HAND_ACTUATED = tuple(j for j in _hand_joints("L") + _hand_joints("R") if j not in INSPIRE_MIMIC)
+
+# URDF inertial of *_wrist_yaw_link without a hand (mjlab's g1.xml folds the rubber hand into it).
+_WRIST_YAW_INERTIAL = {
+    "left": dict(mass=0.08457647, ipos=[0.02200382, 0.00049485, 0.00053861],
+                 iquat=[0.68276135, -0.12133658, -0.13511889, 0.7077127], inertia=[5.97564e-05, 5.09807e-05, 3.75684e-05]),
+    "right": dict(mass=0.08457647, ipos=[0.02200382, -0.00049485, 0.00053861],
+                  iquat=[0.7077127, -0.13511889, -0.12133658, 0.68276135], inertia=[5.97564e-05, 5.09807e-05, 3.75684e-05]),
+}
+# Both thumb followers hit their upper limits (0.8 / 1.2) at pitch 0.5 and their lower limit 0 at pitch 0.
+INSPIRE_THUMB_PITCH_RANGE = (0.0, 0.5)
+# Relaxed hand: used as the action offset and the observation origin of the hand joints.
+INSPIRE_HAND_DEFAULT = {"thumb_proximal_yaw": 0.6, "thumb_proximal_pitch": 0.2, "proximal": 0.4}
+INSPIRE_HAND_ACTION_SCALE = 0.6  # rad per unit action
+# Finger drive: the URDF effort limit, and a 10 Hz / damping-ratio-2 position loop on the armature, like
+# mjlab's G1 actuators.
+INSPIRE_HAND_EFFORT = 1.0
+INSPIRE_HAND_ARMATURE = 1.0e-3
+INSPIRE_FOLLOWER_ARMATURE = 1.0e-4
+
+
+@dataclass(frozen=True)
+class RobotSpec:
+    name: str
+    joint_names: tuple[str, ...]  # every hinge, in qpos order
+    actuated_joint_names: tuple[str, ...]  # in qpos order (= mjlab action order)
+    tracked_bodies: tuple[str, ...]
+    anchor_body: str
+    root_body: str
+    foot_geom_regex: str
+    limit_joint_names: tuple[str, ...]  # joints under the soft joint-limit penalty
+    hand_joint_names: tuple[str, ...]  # joints scored by the hand-tracking reward (empty: no such term)
+    mimic: tuple[tuple[str, str, float], ...]  # (follower, driver, multiplier): follower = multiplier * driver
+    entity_cfg_fn: Callable[[], EntityCfg]
+    action_scale_fn: Callable[[], dict[str, float]]
+    spec_fn: Callable[[], mujoco.MjSpec]
+    nconmax: int
+    njmax: int
+
+    @property
+    def nj(self) -> int:
+        return len(self.joint_names)
+
+    @property
+    def na(self) -> int:
+        return len(self.actuated_joint_names)
+
+    @property
+    def nq(self) -> int:
+        return 7 + self.nj
+
+    @property
+    def nv(self) -> int:
+        return 6 + self.nj
+
+    @property
+    def state_dim(self) -> int:
+        """[root pos 3, root quat 4, joint pos nj, root lin vel 3, root ang vel 3, joint vel nj]."""
+        return self.nq + self.nv
+
+    @property
+    def delta_dim(self) -> int:
+        return 12 + 2 * self.nj
+
+    @property
+    def xi_dim(self) -> int:
+        """Foot friction 1 + encoder bias nj + torso COM offset 3."""
+        return 4 + self.nj
+
+    @property
+    def obs_frame_dim(self) -> int:
+        """joint pos nj, joint vel nj, base ang vel 3, projected gravity 3, last action na."""
+        return 2 * self.nj + 6 + self.na
+
+    @property
+    def goal_frame_dim(self) -> int:
+        """joint pos - q0 nj, joint vel nj, gravity 3, ang vel 3, lin vel 3, height 1."""
+        return 2 * self.nj + 10
+
+    def joint_indices(self, names: tuple[str, ...]) -> list[int]:
+        return [self.joint_names.index(n) for n in names]
+
+    def split_state(self, s):
+        """-> root_pos 3, root_quat 4, joint_pos nj, root_lin_vel_w 3, root_ang_vel 3, joint_vel nj (last axis)."""
+        n = self.nj
+        return s[..., 0:3], s[..., 3:7], s[..., 7 : 7 + n], s[..., 7 + n : 10 + n], s[..., 10 + n : 13 + n], s[..., 13 + n : 13 + 2 * n]
+
+    def mj_model(self) -> mujoco.MjModel:
+        """Standalone CPU model (no mjlab actuators); checks the joint order."""
+        return _compiled(self.name)
+
+
+# ----------------------------------------------------------------------------- G1
+
+
+def _g1_spec() -> mujoco.MjSpec:
+    from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec
+
+    return get_spec()
+
+
+def _g1_entity_cfg() -> EntityCfg:
+    from mjlab.asset_zoo.robots import get_g1_robot_cfg
+
+    return get_g1_robot_cfg()
+
+
+def _g1_action_scale() -> dict[str, float]:
+    from mjlab.asset_zoo.robots import G1_ACTION_SCALE
+
+    return dict(G1_ACTION_SCALE)
+
+
+# ----------------------------------------------------------------------------- G1 + Inspire
+
+
+def _inspire_spec() -> mujoco.MjSpec:
+    spec = _g1_spec()
+    hands = mujoco.MjSpec.from_file(str(ASSETS / "inspire_hands/inspire_hands.xml"))
+    for side, s in (("left", "L"), ("right", "R")):
+        wrist = spec.body(f"{side}_wrist_yaw_link")
+        for g in list(wrist.geoms):
+            if g.name == f"{side}_hand_collision" or g.meshname == f"{side}_rubber_hand":
+                spec.delete(g)
+        w = _WRIST_YAW_INERTIAL[side]
+        wrist.mass, wrist.ipos, wrist.iquat, wrist.inertia = w["mass"], w["ipos"], w["iquat"], w["inertia"]
+        wrist.explicitinertial = True
+        base = hands.body(f"{s}_hand_base_link")
+        frame = wrist.add_frame()
+        frame.attach_body(base, "", "")
+        hand_bodies = [f"{s}_hand_base_link"] + [b.name for b in spec.body(f"{s}_hand_base_link").find_all(mujoco.mjtObj.mjOBJ_BODY)]
+        # Phalanges of one hand never collide with each other (their primitives overlap at the knuckles).
+        for i, b1 in enumerate(hand_bodies):
+            for b2 in hand_bodies[i + 1 :]:
+                spec.add_exclude(bodyname1=b1, bodyname2=b2)
+    for j in spec.joints:
+        if j.name.endswith("thumb_proximal_pitch_joint"):
+            j.range = list(INSPIRE_THUMB_PITCH_RANGE)
+        if j.name in INSPIRE_MIMIC:
+            j.armature = INSPIRE_FOLLOWER_ARMATURE
+    return spec
+
+
+def _inspire_hand_default() -> dict[str, float]:
+    out: dict[str, float] = {}
+    for s in "LR":
+        out[f"{s}_thumb_proximal_yaw_joint"] = INSPIRE_HAND_DEFAULT["thumb_proximal_yaw"]
+        out[f"{s}_thumb_proximal_pitch_joint"] = INSPIRE_HAND_DEFAULT["thumb_proximal_pitch"]
+        for f in ("index", "middle", "ring", "pinky"):
+            out[f"{s}_{f}_proximal_joint"] = INSPIRE_HAND_DEFAULT["proximal"]
+    for follower, (driver, mult) in INSPIRE_MIMIC.items():
+        out[follower] = mult * out[driver]
+    return out
+
+
+def _inspire_entity_cfg() -> EntityCfg:
+    import math
+
+    from mjlab.actuator import BuiltinPositionActuatorCfg
+    from mjlab.asset_zoo.robots.unitree_g1 import g1_constants as g1c
+    from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
+
+    wn = 10 * 2.0 * math.pi
+    hand = BuiltinPositionActuatorCfg(
+        target_names_expr=INSPIRE_HAND_ACTUATED,
+        stiffness=INSPIRE_HAND_ARMATURE * wn**2,
+        damping=2.0 * 2.0 * INSPIRE_HAND_ARMATURE * wn,
+        effort_limit=INSPIRE_HAND_EFFORT,
+        armature=INSPIRE_HAND_ARMATURE,
+    )
+    init = g1c.KNEES_BENT_KEYFRAME
+    return EntityCfg(
+        init_state=EntityCfg.InitialStateCfg(pos=init.pos, joint_pos={**init.joint_pos, **_inspire_hand_default()}, joint_vel={".*": 0.0}),
+        collisions=(g1c.FULL_COLLISION,),
+        spec_fn=_inspire_spec,
+        articulation=EntityArticulationInfoCfg(actuators=(*g1c.G1_ARTICULATION.actuators, hand), soft_joint_pos_limit_factor=0.9),
+    )
+
+
+def _inspire_action_scale() -> dict[str, float]:
+    return {**_g1_action_scale(), **{j: INSPIRE_HAND_ACTION_SCALE for j in INSPIRE_HAND_ACTUATED}}
+
+
+# ----------------------------------------------------------------------------- registry
+
+_G1_FEET = r"^(left|right)_foot[1-7]_collision$"
+
+ROBOTS: dict[str, RobotSpec] = {
+    "g1": RobotSpec(
+        name="g1",
+        joint_names=G1_JOINT_NAMES,
+        actuated_joint_names=G1_JOINT_NAMES,
+        tracked_bodies=G1_TRACKED_BODIES,
+        anchor_body="torso_link",
+        root_body="pelvis",
+        foot_geom_regex=_G1_FEET,
+        limit_joint_names=G1_JOINT_NAMES,
+        hand_joint_names=(),
+        mimic=(),
+        entity_cfg_fn=_g1_entity_cfg,
+        action_scale_fn=_g1_action_scale,
+        spec_fn=_g1_spec,
+        nconmax=35,
+        njmax=250,
+    ),
+    "g1_inspire": RobotSpec(
+        name="g1_inspire",
+        joint_names=INSPIRE_JOINT_NAMES,
+        actuated_joint_names=tuple(j for j in INSPIRE_JOINT_NAMES if j not in INSPIRE_MIMIC),
+        tracked_bodies=G1_TRACKED_BODIES,
+        anchor_body="torso_link",
+        root_body="pelvis",
+        foot_geom_regex=_G1_FEET,
+        limit_joint_names=G1_JOINT_NAMES,
+        hand_joint_names=INSPIRE_HAND_ACTUATED,
+        mimic=tuple((f, d, m) for f, (d, m) in INSPIRE_MIMIC.items()),
+        entity_cfg_fn=_inspire_entity_cfg,
+        action_scale_fn=_inspire_action_scale,
+        spec_fn=_inspire_spec,
+        nconmax=60,
+        njmax=400,
+    ),
+}
+
+
+@cache
+def _compiled(name: str) -> mujoco.MjModel:
+    r = ROBOTS[name]
+    model = r.spec_fn().compile()
+    names = tuple(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(model.njnt))
+    assert model.jnt_type[0] == mujoco.mjtJoint.mjJNT_FREE, "first joint must be the free joint"
+    assert names[1:] == r.joint_names, f"joint order mismatch: {names[1:]}"
+    assert model.nq == r.nq and model.nv == r.nv
+    return model
+
+
+def get_robot(name: str | None = None) -> RobotSpec:
+    name = name or os.environ.get("SM_ROBOT", "g1")
+    if name not in ROBOTS:
+        raise ValueError(f"unknown robot {name!r}; choose from {sorted(ROBOTS)}")
+    return ROBOTS[name]
+
+
+ROBOT = get_robot()

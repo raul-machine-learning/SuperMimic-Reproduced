@@ -7,7 +7,8 @@ GPU Simulation so that hundreds of thousands of clips can be converted in parall
 CSV layout (no header, one row per frame):
   cols 0:3   root position (m)
   cols 3:7   root quaternion in **xyzw** order (converted to wxyz here)
-  cols 7:36  29 joint angles in :data:`G1_JOINT_NAMES` order
+  cols 7:36  29 joint angles in :data:`G1_JOINT_NAMES` order (other robots: every hinge of
+             ``supermimic.robots.ROBOT`` in its qpos order, e.g. 53 for ``g1_inspire``)
 
 Output npz keys (same as mjlab ``MotionLoader`` expects):
   fps, joint_pos (T,29), joint_vel (T,29), body_pos_w (T,30,3), body_quat_w (T,30,4) wxyz,
@@ -70,6 +71,13 @@ def g1_xml_path() -> Path:
     import mjlab
 
     return Path(mjlab.__file__).parent / "asset_zoo/robots/unitree_g1/xmls/g1.xml"
+
+
+def load_robot_model() -> mujoco.MjModel:
+    """Standalone CPU MjModel of the active robot (``supermimic.robots.ROBOT``)."""
+    from supermimic.robots import ROBOT
+
+    return load_g1_model() if ROBOT.name == "g1" else ROBOT.mj_model()
 
 
 def load_g1_model(xml_path: str | Path | None = None) -> mujoco.MjModel:
@@ -137,10 +145,10 @@ class ResampledMotion:
     fps: float
     root_pos: np.ndarray  # (T,3)
     root_quat: np.ndarray  # (T,4) wxyz
-    joint_pos: np.ndarray  # (T,29)
+    joint_pos: np.ndarray  # (T,NJ)
     root_lin_vel_w: np.ndarray  # (T,3) world
     root_ang_vel_w: np.ndarray  # (T,3) world
-    joint_vel: np.ndarray  # (T,29)
+    joint_vel: np.ndarray  # (T,NJ)
 
     @property
     def num_frames(self) -> int:
@@ -157,9 +165,9 @@ def csv_format(path: str | Path) -> str:
     return "bones" if first.startswith(BONES_HEADER_PREFIX) else "lafan1"
 
 
-def load_csv(path: str | Path) -> np.ndarray:
-    """Load a G1 retarget CSV in either format. Returns float64 (N, 36) in the LAFAN1 layout:
-    root position (m), root quaternion **xyzw**, 29 joint angles (rad) in G1_JOINT_NAMES order."""
+def load_csv(path: str | Path, num_joints: int = NUM_JOINTS) -> np.ndarray:
+    """Load a G1 retarget CSV in either format. Returns float64 (N, 7 + num_joints) in the LAFAN1 layout:
+    root position (m), root quaternion **xyzw**, joint angles (rad) in qpos order (29 for the G1)."""
     import pandas as pd
 
     if csv_format(path) == "bones":
@@ -178,8 +186,8 @@ def load_csv(path: str | Path) -> np.ndarray:
         arr = np.concatenate([pos, quat_xyzw, joints], axis=1)
     else:
         arr = pd.read_csv(path, header=None, dtype=np.float64).to_numpy()
-    if arr.ndim != 2 or arr.shape[1] != 7 + NUM_JOINTS:
-        raise ValueError(f"{path}: expected (N, {7 + NUM_JOINTS}) got {arr.shape}")
+    if arr.ndim != 2 or arr.shape[1] != 7 + num_joints:
+        raise ValueError(f"{path}: expected (N, {7 + num_joints}) got {arr.shape}")
     return arr
 
 
@@ -312,8 +320,9 @@ def convert_csv_to_npz(
     model: mujoco.MjModel | None = None,
 ) -> dict:
     """Convert one CSV to an mjlab-compatible npz. Returns a small summary dict."""
-    model = model or load_g1_model()
-    raw = load_csv(csv_path)
+    model = model or load_robot_model()
+    joint_names = tuple(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(1, model.njnt))
+    raw = load_csv(csv_path, len(joint_names))
     motion = resample_motion(raw, input_fps, output_fps)
     bodies = forward_kinematics(model, motion)
     out_path = Path(out_path)
@@ -327,7 +336,7 @@ def convert_csv_to_npz(
         body_quat_w=bodies.quat_w.astype(np.float32),
         body_lin_vel_w=bodies.lin_vel_w.astype(np.float32),
         body_ang_vel_w=bodies.ang_vel_w.astype(np.float32),
-        joint_names=np.array(G1_JOINT_NAMES),
+        joint_names=np.array(joint_names),
         body_names=np.array(bodies.body_names),
         source=np.array(str(csv_path)),
         input_fps=np.array([input_fps], dtype=np.float32),

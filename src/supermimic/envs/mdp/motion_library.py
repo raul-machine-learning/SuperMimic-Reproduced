@@ -9,13 +9,13 @@ Two storage modes:
 * **full** (small sets, e.g. LAFAN1): per frame we keep the reference joints, the pelvis
   state and the world-frame link states of the *tracked* bodies, plus precomputed 68-d
   goal features. ~1 KB/frame.
-* **compact** (BONES-SEED, 47.5M frames): per frame only the 71-d reference state
-  ``[root_pos(3), root_quat(4), joint_pos(29), root_lin_vel_w(3), root_ang_vel_w(3),
-  joint_vel(29)]`` in fp16/fp32 (284 B/frame in fp32); tracked-body states and goal
+* **compact** (BONES-SEED, 47.5M frames): per frame only the reference state
+  ``[root_pos(3), root_quat(4), joint_pos(NJ), root_lin_vel_w(3), root_ang_vel_w(3),
+  joint_vel(NJ)]`` (71-d for the G1) in fp16/fp32 (284 B/frame in fp32); tracked-body states and goal
   features are computed on the fly with the differentiable FK (plan 1.3).
 
-Goal features (per frame, 68-d, plan D5):
-  [joint_pos - q0 (29), joint_vel (29), projected gravity of the ref root (3),
+Goal features (per frame, 68-d for the G1, plan D5):
+  [joint_pos - q0 (NJ), joint_vel (NJ), projected gravity of the ref root (3),
    ref root angular velocity in the root frame (3),
    ref root linear velocity in the ref heading frame (3), ref root height (1)]
 """
@@ -29,9 +29,10 @@ import numpy as np
 import torch
 
 from supermimic.kinematics.rotations import projected_gravity, quat_apply_inverse, yaw_quat
+from supermimic.robots import ROBOT
 
-GOAL_FEAT_DIM = 68
-REF_DIM = 71
+GOAL_FEAT_DIM = ROBOT.goal_frame_dim
+REF_DIM = ROBOT.state_dim
 
 
 @dataclass
@@ -49,10 +50,10 @@ class ClipInfo:
 class RefState:
     root_pos_w: torch.Tensor  # (N,3)
     root_quat_w: torch.Tensor  # (N,4) wxyz
-    joint_pos: torch.Tensor  # (N,29)
+    joint_pos: torch.Tensor  # (N,NJ)
     root_lin_vel_w: torch.Tensor  # (N,3)
     root_ang_vel_w: torch.Tensor  # (N,3)
-    joint_vel: torch.Tensor  # (N,29)
+    joint_vel: torch.Tensor  # (N,NJ)
 
 
 @dataclass
@@ -147,10 +148,10 @@ class MotionLibrary:
             del body_chunks
             self.goal_feat = goal_features(self._split(self._ref), q0)
         else:
-            from supermimic.data.motion_convert import load_g1_model
+            from supermimic.data.motion_convert import load_robot_model
             from supermimic.kinematics.g1_fk import G1Kinematics
 
-            self._fk = G1Kinematics(load_g1_model(), device=self.device, dtype=dtype)
+            self._fk = G1Kinematics(load_robot_model(), device=self.device, dtype=dtype)
             self._tracked_idx = self._fk.body_indices(self.body_names)
 
         self.clip_start = torch.tensor([c.start for c in clips], device=self.device, dtype=torch.long)
@@ -171,7 +172,7 @@ class MotionLibrary:
 
     @staticmethod
     def _split(r: torch.Tensor) -> RefState:
-        return RefState(r[..., 0:3], r[..., 3:7], r[..., 7:36], r[..., 36:39], r[..., 39:42], r[..., 42:71])
+        return RefState(*ROBOT.split_state(r))
 
     def ref(self, frame: torch.Tensor) -> RefState:
         return self._split(self._ref[frame].to(self.dtype))
@@ -200,19 +201,19 @@ class MotionLibrary:
 
     @property
     def joint_pos(self) -> torch.Tensor:
-        return self._ref[:, 7:36].to(self.dtype)
+        return ROBOT.split_state(self._ref)[2].to(self.dtype)
 
     @property
     def root_lin_vel_w(self) -> torch.Tensor:
-        return self._ref[:, 36:39].to(self.dtype)
+        return ROBOT.split_state(self._ref)[3].to(self.dtype)
 
     @property
     def root_ang_vel_w(self) -> torch.Tensor:
-        return self._ref[:, 39:42].to(self.dtype)
+        return ROBOT.split_state(self._ref)[4].to(self.dtype)
 
     @property
     def joint_vel(self) -> torch.Tensor:
-        return self._ref[:, 42:71].to(self.dtype)
+        return ROBOT.split_state(self._ref)[5].to(self.dtype)
 
     # ------------------------------------------------------------------ queries
 
@@ -224,7 +225,7 @@ class MotionLibrary:
         return self.clip_last[self.frame_clip[frame]]
 
     def goal_window(self, frame: torch.Tensor, k: int) -> torch.Tensor:
-        """(N, k*68) goal features of frames frame..frame+k-1, clamped at the clip end."""
+        """(N, k*GOAL_FEAT_DIM) goal features of frames frame..frame+k-1, clamped at the clip end."""
         last = self.last_frame_of(frame)
         offs = torch.arange(k, device=self.device)
         idx = torch.minimum(frame[:, None] + offs[None, :], last[:, None])  # (N,k)
@@ -234,7 +235,7 @@ class MotionLibrary:
         return feat.reshape(frame.shape[0], k * GOAL_FEAT_DIM)
 
     def ref_qpos_qvel(self, frame: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """MuJoCo-layout reference state: qpos (N,36) and qvel (N,35; root ang vel in body frame)."""
+        """MuJoCo-layout reference state: qpos (N,NQ) and qvel (N,NV; root ang vel in body frame)."""
         r = self.ref(frame)
         qpos = torch.cat([r.root_pos_w, r.root_quat_w, r.joint_pos], dim=-1)
         ang_b = quat_apply_inverse(r.root_quat_w, r.root_ang_vel_w)
