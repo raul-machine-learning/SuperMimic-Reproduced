@@ -72,7 +72,7 @@ class ReplayRecorder(RecorderTerm):
             ids,
             s=self.prev_s[ids],
             a=env.action_manager.action[ids],
-            a_exec=self.action_term.executed_raw[ids],
+            a_exec=self.action_term.executed_abs[ids],
             xi=self.prev_xi[ids],
             r=env.reward_buf[ids],
             done=done_next,

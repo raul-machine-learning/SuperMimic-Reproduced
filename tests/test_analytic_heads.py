@@ -46,10 +46,13 @@ def _ref_from_command(cmd):
     from supermimic.world_model.heads import ReferenceFrame
 
     lib, f = cmd.library, cmd.frame
+    r = lib.ref(f)
     return ReferenceFrame(
         body_pos_w=lib.body_pos_w[f], body_quat_w=lib.body_quat_w[f],
         body_lin_vel_w=lib.body_lin_vel_w[f], body_ang_vel_w=lib.body_ang_vel_w[f],
         root_pos_w=lib.root_pos_w[f], root_quat_w=lib.root_quat_w[f], joint_pos=lib.joint_pos[f],
+        prop_pos_w=r.prop_pos_w, prop_quat_w=r.prop_quat_w,
+        taxel_pressed=lib.taxel_pressed[f] if ROBOT.grip else None,
     )
 
 
@@ -58,6 +61,7 @@ def test_reward_terms_match_mjlab(setup):
     from mjlab.envs import mdp as base_mdp
     from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+    from supermimic.envs.mdp import rewards as sm_rew
     from supermimic.envs.mdp.rewards import motion_hand_joint_position_error_exp
 
     env.reset()
@@ -85,6 +89,11 @@ def test_reward_terms_match_mjlab(setup):
         if ROBOT.hand_joint_names:
             hand_ids = ROBOT.joint_indices(ROBOT.hand_joint_names)
             theirs["motion_hand_joint_pos"] = motion_hand_joint_position_error_exp(env, "motion", 0.3, hand_ids)
+        if ROBOT.props:
+            theirs["motion_prop_pos"] = rc.w_prop_pos * sm_rew.motion_prop_position_error_exp(env, "motion", rc.std_prop_pos)
+            theirs["motion_prop_ori"] = rc.w_prop_ori * sm_rew.motion_prop_orientation_error_exp(env, "motion", rc.std_prop_ori)
+        if ROBOT.grip:
+            theirs["grip_glove"] = rc.w_grip * sm_rew.grip_glove_agreement(env, "motion")
         assert set(theirs) == set(ours) - {"total"}
         for k, v in theirs.items():
             d = (ours[k] / 0.02 - v).abs().max().item()
@@ -95,7 +104,7 @@ def test_reward_terms_match_mjlab(setup):
 
 def test_observation_head_matches_env(setup):
     env, heads, io, robot = setup["env"], setup["heads"], setup["io"], setup["robot"]
-    from supermimic.world_model.heads import analytic_observation, flatten_history_term_major
+    from supermimic.world_model.heads import OBS_TERMS, analytic_observation, flatten_history_term_major
 
     cmd = env.command_manager.get_term("motion")
     cmd.forced_frame[:] = cmd.library.clip_start[0]  # far from the clip end: no time-out within the rollout
@@ -115,7 +124,7 @@ def test_observation_head_matches_env(setup):
         newest = obs["policy"].view(env.num_envs, -1)
         # Newest frame of each term in the term-major layout.
         start = 0
-        for name, d in (("joint_pos", NJ), ("joint_vel", NJ), ("base_ang_vel", 3), ("projected_gravity", 3), ("actions", NA)):
+        for name, d in OBS_TERMS:
             block = newest[:, start * 10 : (start + d) * 10].reshape(env.num_envs, 10, d)  # time-major inside a term
             env_newest = block[:, -1, :]
             our = o[:, start : start + d]
@@ -147,6 +156,10 @@ def test_termination_matches_env(setup):
             hands = [TRACKED.index(f"{S}_hand") for S in "LR"]
             dp = (b["pos"][:, hands] - ref.body_pos_w[:, hands]).norm(dim=-1).amax(-1)
             da = quat_error_magnitude(b["quat"][:, hands], ref.body_quat_w[:, hands]).amax(-1)
+            if ROBOT.props:
+                prop = (cmd.sim_prop_pos_w - cmd.prop_pos_w).norm(dim=-1).amax(-1)
+                dp = torch.maximum(dp, prop * (th / ROBOT.prop_drop_threshold))
+                theirs_h = theirs_h | sm_term.bad_prop_pos(env, "motion", ROBOT.prop_drop_threshold)
             np.testing.assert_allclose(f[:, 0].cpu().numpy(), dp.cpu().numpy(), atol=2e-5)
             np.testing.assert_allclose(f[:, 1].cpu().numpy(), da.cpu().numpy(), atol=1e-3)
         else:

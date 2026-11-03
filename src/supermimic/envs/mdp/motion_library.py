@@ -124,6 +124,7 @@ class MotionLibrary:
         body_idx = root_idx = None
         ref_chunks: list[np.ndarray] = []
         loaded_chunks: list[np.ndarray] = []
+        pressed_chunks: list[np.ndarray] = []
         nh = len(ROBOT.hand_joint_names)
         body_chunks = {"pos": [], "quat": [], "lin": [], "ang": []}
         # A single packed cache (build_library.py) can stand in for the npz list (compact mode only).
@@ -156,6 +157,11 @@ class MotionLibrary:
                     loaded_chunks.append(d["hand_loaded"].astype(np.float32))
                 else:
                     loaded_chunks.append(np.zeros((n, nh), np.float32))
+                if ROBOT.grip:
+                    if "taxel_pressed" not in d:
+                        raise ValueError(f"{f} has no glove reference (scripts/data/make_rig_clip.py)")
+                    sides = ["LR".index(s) for s, _ in ROBOT.grip]
+                    pressed_chunks.append(d["taxel_pressed"][:, sides].astype(np.float32))
                 if not compact:
                     body_chunks["pos"].append(bp[:, body_idx])
                     body_chunks["quat"].append(bq[:, body_idx])
@@ -173,6 +179,8 @@ class MotionLibrary:
             self._ref = torch.as_tensor(ref_np, device=self.device, dtype=store_dtype if compact else dtype)
             del ref_np, ref_chunks
             self.hand_loaded = torch.as_tensor(np.concatenate(loaded_chunks, 0), device=self.device, dtype=dtype)
+            # (N, H, 129) glove taxels pressed per frame, for the hands of ROBOT.grip (in that order).
+            self.taxel_pressed = torch.as_tensor(np.concatenate(pressed_chunks, 0), device=self.device, dtype=dtype) if ROBOT.grip else None
         else:
             self.hand_loaded = torch.zeros(self.num_frames, nh, device=self.device, dtype=dtype)
         if not compact:

@@ -35,6 +35,7 @@ from supermimic.envs.actions import NoisyJointPositionActionCfg
 from supermimic.envs.mdp import observations as sm_obs
 from supermimic.envs.mdp import terminations as sm_term
 from supermimic.envs.mdp.commands import MultiClipMotionCommandCfg
+from supermimic.envs.mdp import rewards as sm_rew
 from supermimic.envs.mdp.rewards import TrackingRewardCfg, motion_hand_joint_position_error_exp
 from supermimic.robots import ROBOT
 
@@ -51,6 +52,7 @@ TRACKED_BODIES = ROBOT.tracked_bodies
 ANCHOR_BODY = ROBOT.anchor_body
 ROOT_BODY = ROBOT.root_body
 FOOT_GEOM_REGEX = ROBOT.foot_geom_regex
+PROP_OBS_NOISE = 0.005  # half-width of the uniform noise on the observed prop poses
 
 
 @dataclass
@@ -89,6 +91,8 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         "projected_gravity": ObservationTermCfg(func=base_mdp.projected_gravity, noise=noise(-0.05, 0.05)),
         "actions": ObservationTermCfg(func=base_mdp.last_action),
     }
+    if ROBOT.props:
+        policy_terms["prop_pose"] = ObservationTermCfg(func=sm_obs.prop_pose, params={"command_name": "motion"}, noise=noise(-PROP_OBS_NOISE, PROP_OBS_NOISE))
     observations = {
         "policy": ObservationGroupCfg(
             terms=policy_terms,
@@ -122,6 +126,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
             scale=ROBOT.action_scale_fn(),
             use_default_offset=True,
             noise_std=a.action_noise_std,
+            reference_offset=ROBOT.residual_actions,
         )
     }
 
@@ -208,6 +213,11 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
             func=motion_hand_joint_position_error_exp, weight=rc.w_hand_joint_pos,
             params={"command_name": "motion", "std": rc.std_hand_joint_pos, "joint_ids": ROBOT.joint_indices(ROBOT.hand_joint_names)},
         )
+    if ROBOT.props:
+        rewards["motion_prop_pos"] = RewardTermCfg(func=sm_rew.motion_prop_position_error_exp, weight=rc.w_prop_pos, params={"command_name": "motion", "std": rc.std_prop_pos})
+        rewards["motion_prop_ori"] = RewardTermCfg(func=sm_rew.motion_prop_orientation_error_exp, weight=rc.w_prop_ori, params={"command_name": "motion", "std": rc.std_prop_ori})
+    if ROBOT.grip:
+        rewards["grip_glove"] = RewardTermCfg(func=sm_rew.grip_glove_agreement, weight=rc.w_grip, params={"command_name": "motion"})
 
     # ---------------------------------------------------------------- terminations
     terminations = {
@@ -220,13 +230,21 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
     else:
         terminations["root_height"] = TerminationTermCfg(func=sm_term.bad_root_height, params={"command_name": "motion", "threshold": a.root_height_threshold})
         terminations["root_tilt"] = TerminationTermCfg(func=sm_term.bad_root_tilt, params={"command_name": "motion", "threshold": a.root_tilt_threshold})
+    if ROBOT.props:
+        terminations["prop_pos"] = TerminationTermCfg(func=sm_term.bad_prop_pos, params={"command_name": "motion", "threshold": ROBOT.prop_drop_threshold})
+
+    entities = {"robot": ROBOT.entity_cfg_fn()}
+    if ROBOT.props:
+        from supermimic.envs.props import PropSceneCfg, prop_entity_cfgs
+
+        entities.update(prop_entity_cfgs(PropSceneCfg.from_clip(a.npz_files[0]), ROBOT.props))
 
     recorders = {}
     if a.record_transitions:
         recorders["replay"] = ReplayRecorderCfg(params={"capacity": a.replay_capacity, "foot_geom_regex": FOOT_GEOM_REGEX, "com_body_name": ROBOT.com_body})
 
     cfg = ManagerBasedRlEnvCfg(
-        scene=SceneCfg(terrain=TerrainEntityCfg(terrain_type="plane"), num_envs=a.num_envs, entities={"robot": ROBOT.entity_cfg_fn()},
+        scene=SceneCfg(terrain=TerrainEntityCfg(terrain_type="plane"), num_envs=a.num_envs, entities=entities,
                        env_spacing=0.0 if ROBOT.fixed_root else 2.0),
         observations=observations,
         actions=actions,

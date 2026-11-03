@@ -36,7 +36,7 @@ class DynamicsMLP(nn.Module):
         super().__init__()
         from supermimic.robots import ROBOT
 
-        feat_dim = feat_dim or ROBOT.state_dim
+        feat_dim = feat_dim or ROBOT.feat_dim
         act_dim = act_dim or ROBOT.na
         xi_dim = xi_dim or ROBOT.xi_dim
         out_dim = out_dim or ROBOT.delta_dim

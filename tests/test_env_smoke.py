@@ -61,8 +61,17 @@ def test_replay_rows_and_windows(env):
     w = buf.sample_windows(256, 8)
     assert w.states.shape == (9, 256, ROBOT.state_dim) and w.a_exec.shape == (8, 256, ROBOT.na) and w.xi.shape == (256, ROBOT.xi_dim)
     assert torch.isfinite(w.states).all()
-    # Executed action differs from the clean one by the injected noise only.
-    d = (w.a_exec - w.a_clean).std().item()
+    # Executed action differs from the clean one by the injected noise only (and, with residual actions, by the
+    # reference set-point of the next frame in default-offset units).
+    a_ref = torch.zeros_like(w.a_exec)
+    if ROBOT.residual_actions:
+        lib = env.command_manager.get_term("motion").library
+        f = w.frame.reshape(-1)
+        nxt = torch.minimum(f + 1, lib.last_frame_of(f))
+        act = ROBOT.joint_indices(ROBOT.actuated_joint_names)
+        scale = torch.tensor(ROBOT.action_scale_vector(), device=f.device)
+        a_ref = ((lib.ref(nxt).joint_pos[:, act] - lib.default_joint_pos[act]) / scale).reshape(w.a_exec.shape)
+    d = (w.a_exec - a_ref - w.a_clean).std().item()
     assert 0.05 < d < 0.2, d
     s = buf.sample_starts(128, hist=10)
     assert s.hist_states.shape == (10, 128, ROBOT.state_dim) and s.hist_actions.shape == (10, 128, ROBOT.na)

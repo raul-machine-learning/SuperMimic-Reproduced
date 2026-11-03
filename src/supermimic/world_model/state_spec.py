@@ -19,6 +19,11 @@ last layer of the dynamics MLP is zero-initialised so training starts from it.
 
 Loss / error normalisation (D3): per-quantity nominal scales sigma applied to the
 70-d error vector [dp(3), rotvec(3), dv(3), dw(3), dq(29), dqd(29)].
+
+Props (``ROBOT.props``) append per prop, after the robot block:
+    features  [pos rel. root in heading frame(3), rot6d(heading^-1 ⊗ quat)(6), lin vel in heading frame(3), ang vel body(3)]
+    delta     [dv_h(3), dw_b(3), dp_h(3), dth_b(3)], integrated like the root
+    error     [dp(3), rotvec(3), dv(3), dw(3)]
 """
 
 from __future__ import annotations
@@ -41,7 +46,8 @@ from supermimic.kinematics.rotations import (
 from supermimic.robots import ROBOT
 
 STATE_DIM = ROBOT.state_dim
-FEAT_DIM = ROBOT.state_dim
+FEAT_DIM = ROBOT.feat_dim
+NP = ROBOT.num_props
 DELTA_DIM = ROBOT.delta_dim
 NJ = ROBOT.nj
 
@@ -55,6 +61,11 @@ class StateSpecCfg:
     out_scale: tuple[float, ...] = (0.3, 0.5, 2.0, 0.01, 0.02, 0.02)
     # Input feature scales for [root_z, rot6d, lin_vel_h, ang_vel_b, joint_pos, joint_vel] (divide by these).
     in_scale: tuple[float, ...] = (1.0, 1.0, 1.0, 2.0, 1.0, 5.0)
+    # Per prop: error scales [pos, rotvec, lin vel, ang vel], output scales [dv_h, dw_b, dp_h, dth_b],
+    # input scales [pos, rot6d, lin vel, ang vel].
+    prop_err_scale: tuple[float, ...] = (0.02, 0.1, 0.5, 2.0)
+    prop_out_scale: tuple[float, ...] = (0.3, 2.0, 0.005, 0.02)
+    prop_in_scale: tuple[float, ...] = (0.5, 1.0, 1.0, 5.0)
     explicit_integration: bool = True
     # xi normalisation: (offset, scale) for friction, encoder bias, com offset.
     xi_offset: tuple[float, ...] = field(default_factory=lambda: (0.75,) + (0.0,) * NJ + (0.0,) * 3)
@@ -68,9 +79,10 @@ class StateSpec:
         # Joint segments are scaled per joint (ROBOT.joint_scale: slides in metres are smaller than hinge angles).
         js = torch.tensor(ROBOT.joint_scale)
         rep = lambda scales, sizes: torch.cat([torch.full((n,), float(s)) * (js if n == NJ else 1.0) for s, n in zip(scales, sizes)])  # noqa: E731
-        self.err_scale = rep(cfg.err_scale, (3, 3, 3, 3, NJ, NJ)).to(device=device, dtype=dtype)
-        self.out_scale = rep(cfg.out_scale, (3, 3, NJ, 3, 3, NJ)).to(device=device, dtype=dtype)
-        self.in_scale = rep(cfg.in_scale, (1, 6, 3, 3, NJ, NJ)).to(device=device, dtype=dtype)
+        prop = lambda scales, sizes: torch.cat([torch.full((n,), float(s)) for s, n in zip(scales, sizes)]).repeat(NP)  # noqa: E731
+        self.err_scale = torch.cat([rep(cfg.err_scale, (3, 3, 3, 3, NJ, NJ)), prop(cfg.prop_err_scale, (3, 3, 3, 3))]).to(device=device, dtype=dtype)
+        self.out_scale = torch.cat([rep(cfg.out_scale, (3, 3, NJ, 3, 3, NJ)), prop(cfg.prop_out_scale, (3, 3, 3, 3))]).to(device=device, dtype=dtype)
+        self.in_scale = torch.cat([rep(cfg.in_scale, (1, 6, 3, 3, NJ, NJ)), prop(cfg.prop_in_scale, (3, 6, 3, 3))]).to(device=device, dtype=dtype)
         self.xi_offset = torch.tensor(cfg.xi_offset, device=device, dtype=dtype)
         self.xi_scale = torch.tensor(cfg.xi_scale, device=device, dtype=dtype)
 
@@ -87,8 +99,14 @@ class StateSpec:
         hq = heading_quat(q)
         q_local = quat_canonical(quat_mul(quat_apply_inverse_quat(hq), q))
         v_h = quat_apply_inverse(hq, v)
-        feat = torch.cat([p[..., 2:3], rot6d_from_quat(q_local), v_h, w, qj, qd], dim=-1)
-        return feat / self.in_scale
+        parts = [p[..., 2:3], rot6d_from_quat(q_local), v_h, w, qj, qd]
+        if NP:
+            pp, pq, pv, pw = ROBOT.split_props(s)
+            hp = hq[..., None, :].expand(*pq.shape)
+            pq_local = quat_canonical(quat_mul(quat_apply_inverse_quat(hp), quat_normalize(pq)))
+            blocks = [quat_apply_inverse(hp, pp - p[..., None, :]), rot6d_from_quat(pq_local), quat_apply_inverse(hp, pv), pw]
+            parts.append(torch.cat(blocks, dim=-1).flatten(-2))
+        return torch.cat(parts, dim=-1) / self.in_scale
 
     def normalize_xi(self, xi: torch.Tensor) -> torch.Tensor:
         return (xi - self.xi_offset) / self.xi_scale
@@ -111,7 +129,17 @@ class StateSpec:
         p_new = p + dt * v_new + quat_apply(hq, dp_h)
         q_new = quat_normalize(quat_mul(q, quat_from_rotvec(dt * w_new + dth_b)))
         qj_new = qj + dt * qd_new + dq
-        return torch.cat([p_new, q_new, qj_new, v_new, w_new, qd_new], dim=-1)
+        out = [p_new, q_new, qj_new, v_new, w_new, qd_new]
+        if NP:
+            pd = d[..., 12 + 2 * n :].reshape(*d.shape[:-1], NP, 12)
+            pp, pq, pv, pw = ROBOT.split_props(s)
+            hp = hq[..., None, :].expand(*pq.shape)
+            pv_new = pv + quat_apply(hp, pd[..., 0:3])
+            pw_new = pw + pd[..., 3:6]
+            pp_new = pp + dt * pv_new + quat_apply(hp, pd[..., 6:9])
+            pq_new = quat_normalize(quat_mul(quat_normalize(pq), quat_from_rotvec(dt * pw_new + pd[..., 9:12])))
+            out.append(torch.cat([pp_new, pq_new, pv_new, pw_new], dim=-1).flatten(-2))
+        return torch.cat(out, dim=-1)
 
     # ------------------------------------------------------------------ errors
 
@@ -122,8 +150,12 @@ class StateSpec:
         q1 = quat_normalize(q1)
         q2 = quat_normalize(q2)
         rot_err = rotvec_from_quat(quat_mul(quat_apply_inverse_quat(q2), q1))
-        err = torch.cat([p1 - p2, rot_err, v1 - v2, w1 - w2, qj1 - qj2, qd1 - qd2], dim=-1)
-        return err / self.err_scale
+        parts = [p1 - p2, rot_err, v1 - v2, w1 - w2, qj1 - qj2, qd1 - qd2]
+        if NP:
+            a, b = ROBOT.split_props(s_pred), ROBOT.split_props(s_true)
+            prot = rotvec_from_quat(quat_mul(quat_apply_inverse_quat(quat_normalize(b[1])), quat_normalize(a[1])))
+            parts.append(torch.cat([a[0] - b[0], prot, a[2] - b[2], a[3] - b[3]], dim=-1).flatten(-2))
+        return torch.cat(parts, dim=-1) / self.err_scale
 
     def normalized_sq_error(self, s_pred: torch.Tensor, s_true: torch.Tensor) -> torch.Tensor:
         """Mean over dims of the squared normalised error (the reported 'prediction error')."""

@@ -9,7 +9,10 @@ intrinsic y-x-z angles of rig_wrist_quat0^-1 * wrist orientation. Positions are 
 by slerp; velocities by central differences. Body link states come from MuJoCo FK of the rig.
 
 Also written, for the scene with props: the broom and dustpan reference (prop_*_w), the table, scene_scale 1
-(the hands are at human scale) and ``hand_loaded`` (all False: the grip reward reads the glove itself).
+(the hands are at human scale), ``hand_loaded`` (all False: the grip reward reads the glove itself) and
+``taxel_pressed`` (T, 2, 129), the glove taxels pressed at each frame (left, right; sweep_mocap.taxel_pressed),
+cleared on frames where fewer than ``min_pressed`` of a hand's taxels read pressed and in holds shorter than
+``min_hold`` seconds (sensor noise of a free hand).
 """
 
 from __future__ import annotations
@@ -26,11 +29,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.npz",
-         out: Path = ROOT / "data/npz/capsule_hands/sweep_task023.npz", fps: float = 50.0) -> None:
+         out: Path = ROOT / "data/npz/capsule_hands/sweep_task023.npz", fps: float = 50.0, min_pressed: int = 10,
+         min_hold: float = 0.5) -> None:
     from supermimic.data.motion_convert import ResampledMotion, _so3_derivative, forward_kinematics
     from supermimic.robots import ROBOT
 
-    assert ROBOT.name == "capsule_hands", "run with SM_ROBOT=capsule_hands"
+    from supermimic.data.sweep_mocap import taxel_pressed
+
+    assert ROBOT.name.startswith("capsule_hands"), "run with SM_ROBOT=capsule_hands"
     z = np.load(src)
     times = z["times"]
     t = np.arange(times[0], times[-1] + 1e-9, 1.0 / fps)
@@ -82,6 +88,14 @@ def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.np
         lin.append(np.gradient(p, dt, axis=0))
         ang.append(_so3_derivative(q, dt))
 
+    pressed = np.stack([taxel_pressed(z[f"pressure_{s}"], z["pressure_times"], t) for s in ("left", "right")], 1)
+    pressed &= pressed.sum(2, keepdims=True) >= min_pressed
+    for k in range(2):
+        edge = np.diff(np.r_[0, pressed[:, k].any(1).astype(int), 0])
+        for a, b in zip(np.nonzero(edge == 1)[0], np.nonzero(edge == -1)[0]):
+            if b - a < min_hold * fps:
+                pressed[a:b, k] = False
+
     f32 = lambda a: np.asarray(a, np.float32)  # noqa: E731
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
@@ -93,7 +107,11 @@ def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.np
         prop_pos_w=f32(np.stack(pos, 1)), prop_quat_w=f32(np.stack(quat, 1)), prop_lin_vel_w=f32(np.stack(lin, 1)), prop_ang_vel_w=f32(np.stack(ang, 1)),
         table_center=f32(z["table_center"]), table_half=f32(z["table_half"]), scene_scale=np.array(1.0),
         hand_loaded=np.zeros((T, len(ROBOT.hand_joint_names)), bool), hand_loaded_joints=np.array(ROBOT.hand_joint_names),
+        taxel_pressed=pressed,
     )
+    for k, S in enumerate("LR"):
+        g = np.nonzero(pressed[:, k].any(1))[0]
+        print(f"  {S} glove: holding {t[g[0]]:.2f}-{t[g[-1]]:.2f} s, {pressed[g, k].sum(1).mean():.1f} pressed taxels per frame")
     speed = {S: np.linalg.norm(np.gradient(wrist_pos[S], dt, axis=0), axis=1) for S in "LR"}
     print(f"wrote {out}: {T} frames ({(T - 1) / fps:.1f} s at {fps:g} Hz), FK wrist error {err_p * 1000:.3f} mm / {err_r:.4f} deg")
     for S in "LR":

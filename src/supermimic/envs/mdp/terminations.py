@@ -45,6 +45,12 @@ def bad_wrist_ori(env: ManagerBasedRlEnv, command_name: str, threshold: float = 
     return ang.amax(-1) > threshold
 
 
+def bad_prop_pos(env: ManagerBasedRlEnv, command_name: str, threshold: float = 0.15) -> torch.Tensor:
+    """Some prop farther than ``threshold`` (m) from its reference (dropped or knocked away)."""
+    cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
+    return (cmd.sim_prop_pos_w - cmd.prop_pos_w).norm(dim=-1).amax(-1) > threshold
+
+
 def clip_end(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
     return cmd.clip_end

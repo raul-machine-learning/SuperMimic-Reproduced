@@ -23,7 +23,9 @@ REWARD_TERM_NAMES = (
     "motion_body_ang_vel",
     "action_rate_l2",
     "joint_limit",
-) + (("motion_hand_joint_pos",) if ROBOT.hand_joint_names else ())
+) + (("motion_hand_joint_pos",) if ROBOT.hand_joint_names else ()) + (("motion_prop_pos", "motion_prop_ori") if ROBOT.props else ()) + (
+    ("grip_glove",) if ROBOT.grip else ()
+)
 
 
 class ImagStep:
@@ -35,9 +37,10 @@ class ImagStep:
             mode = None if compile_mode == "default" else compile_mode
             self._fn = torch.compile(self._step, mode=mode, dynamic=False)
 
-    def _step(self, s, a, a_prev, xi, ref_body_pos, ref_body_quat, ref_body_lin, ref_body_ang, ref_root_pos, ref_root_quat, ref_joint_pos=None):
-        ref = ReferenceFrame(ref_body_pos, ref_body_quat, ref_body_lin, ref_body_ang, ref_root_pos, ref_root_quat, ref_joint_pos)
-        s_next = self.wm.step(s, a, xi)
+    def _step(self, s, a, a_prev, xi, a_offset, *ref_fields):
+        """``a_offset``: with residual actions, the reference set-point in default-offset action units (else None)."""
+        ref = ReferenceFrame(*ref_fields)
+        s_next = self.wm.step(s, a if a_offset is None else a + a_offset, xi)
         bodies = self.wm.heads.robot_bodies(s_next)
         terms = self.wm.heads.reward(s_next, a, a_prev, ref, bodies)
         r = terms["total"]
@@ -48,5 +51,5 @@ class ImagStep:
         anchor_pose = torch.cat([bodies["pos"][..., ai, :], bodies["quat"][..., ai, :]], dim=-1)  # (n, 7)
         return s_next, r, term_vec, logits, obs_clean, anchor_pose
 
-    def __call__(self, s, a, a_prev, xi, ref: ReferenceFrame):
-        return self._fn(s, a, a_prev, xi, ref.body_pos_w, ref.body_quat_w, ref.body_lin_vel_w, ref.body_ang_vel_w, ref.root_pos_w, ref.root_quat_w, ref.joint_pos)
+    def __call__(self, s, a, a_prev, xi, ref: ReferenceFrame, a_offset=None):
+        return self._fn(s, a, a_prev, xi, a_offset, *vars(ref).values())

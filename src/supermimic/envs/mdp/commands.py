@@ -160,6 +160,11 @@ class MultiClipMotionCommand(CommandTerm):
         """(N,H) 1 where the reference's glove loads that hand joint's finger."""
         return self.library.hand_loaded[self.frame]
 
+    @property
+    def taxel_pressed(self) -> torch.Tensor:
+        """(N,H,129) glove taxels pressed in the reference, for the hands of ``ROBOT.grip``."""
+        return self.library.taxel_pressed[self.frame]
+
     # ------------------------------------------------------------------ robot
 
     @property

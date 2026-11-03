@@ -64,11 +64,11 @@ class WorldModel(nn.Module):
 
     # ------------------------------------------------------------------ Eq. 1
 
-    def _loss_step(self, s, a, xi, s_true, done, ref_root_pos, ref_root_quat, ref_joint_pos):
+    def _loss_step(self, s, a, xi, s_true, done, ref_root_pos, ref_root_quat, ref_joint_pos, ref_prop_pos=None):
         """One autoregressive step of Eq. 1: returns (s_next, sq_err (n,70), term_bce (n,), logits (n,))."""
         s_next = self.step(s, a, xi)
         e = self.spec.error_vector(s_next, s_true)
-        feats = self.heads.termination_features(s_next, ReferenceFrame(None, None, None, None, ref_root_pos, ref_root_quat, ref_joint_pos))
+        feats = self.heads.termination_features(s_next, ReferenceFrame(None, None, None, None, ref_root_pos, ref_root_quat, ref_joint_pos, ref_prop_pos))
         logits = self.term_head(feats)
         bce = F.binary_cross_entropy_with_logits(logits, done, reduction="none")
         return s_next, e * e, bce, logits
@@ -93,7 +93,7 @@ class WorldModel(nn.Module):
         acc_num = 0.0
         step_fn = getattr(self, "_loss_step_fn", None) or self._loss_step
         for j in range(k):
-            s, sq, bce, logits = step_fn(s, a_exec[j], xi, states[j + 1], done[j], refs[j].root_pos_w, refs[j].root_quat_w, refs[j].joint_pos)
+            s, sq, bce, logits = step_fn(s, a_exec[j], xi, states[j + 1], done[j], refs[j].root_pos_w, refs[j].root_quat_w, refs[j].joint_pos, refs[j].prop_pos_w)
             total_state = total_state + sq.sum(-1).mean()
             total_term = total_term + bce.mean()
             with torch.no_grad():

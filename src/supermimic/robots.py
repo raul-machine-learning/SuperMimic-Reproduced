@@ -9,6 +9,8 @@
 * ``capsule_hands``: two capsule hands built from the sweep mocap skeleton (scripts/assets/build_capsule_hands.py),
   no robot body. The root ``rig`` is a free body welded to the world, so the floating-root state layout is kept;
   each hand hangs from it through 3 world slides and 3 hinges, then 21 finger hinges. 54 joints, all actuated.
+* ``capsule_hands_props``: ``capsule_hands`` with the broom (held by the left hand) and the dustpan (right hand)
+  as free props and the table, plus the glove-pattern grip reward.
 
 The state, observation and goal layouts are sized by the number of hinge joints (``nj``) and of props, the
 action by the number of actuated joints (``na``). The active robot is fixed per process by the ``SM_ROBOT``
@@ -21,7 +23,7 @@ The state is the robot block ``[qpos | qvel]`` followed by one 13-d block per pr
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -156,6 +158,12 @@ class RobotSpec:
     fixed_root: bool = False  # root welded to the world: no root reset noise, all env origins at the world origin
     reward_overrides: tuple[tuple[str, float], ...] = ()  # TrackingRewardCfg field -> value
     slide_joint_names: tuple[str, ...] = ()  # in metres: scaled by SLIDE_SCALE wherever joints share one scale
+    # (hand side, prop) pairs scored by the glove-pattern grip reward (supermimic.kinematics.glove).
+    grip: tuple[tuple[str, str], ...] = ()
+    prop_drop_threshold: float = 0.15  # m: a prop this far from its reference ends the episode
+    # Joint set-points are the next reference frame's joint positions plus the scaled action (instead of the
+    # default pose plus the scaled action; supermimic.envs.actions).
+    residual_actions: bool = False
 
     @property
     def nj(self) -> int:
@@ -215,6 +223,13 @@ class RobotSpec:
     def goal_frame_dim(self) -> int:
         """joint pos - q0 nj, joint vel nj, gravity 3, ang vel 3, lin vel 3, height 1, prop pose in the root frame 9 per prop."""
         return 2 * self.nj + 10 + 9 * self.num_props
+
+    def action_scale_vector(self) -> tuple[float, ...]:
+        """Per actuated joint, its action scale (the first matching pattern of ``action_scale_fn``)."""
+        import re
+
+        scales = self.action_scale_fn()
+        return tuple(next(v for k, v in scales.items() if re.fullmatch(k, j)) for j in self.actuated_joint_names)
 
     def joint_indices(self, names: tuple[str, ...]) -> list[int]:
         return [self.joint_names.index(n) for n in names]
@@ -515,8 +530,13 @@ ROBOTS: dict[str, RobotSpec] = {
         fixed_root=True,
         reward_overrides=(("std_body_pos", 0.05), ("std_body_lin_vel", 0.5)),
         slide_joint_names=CAPSULE_SLIDES,
+        residual_actions=True,
     ),
 }
+ROBOTS["capsule_hands_props"] = replace(
+    ROBOTS["capsule_hands"], name="capsule_hands_props", props=("broom", "dustpan"), grip=(("L", "broom"), ("R", "dustpan")),
+    nconmax=96, njmax=600,  # the clip's reference poses need at most 27 contacts and 168 constraint rows
+)
 
 
 @cache

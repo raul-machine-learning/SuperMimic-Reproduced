@@ -23,10 +23,11 @@ class PolicyCfg:
     decoder_hidden: tuple[int, ...] = (2048, 1024, 512, 256)
     latent_dim: int = LATENT_DIM
     history: int = 10
-    # Fixed per-term observation scales (divide): joint_pos, joint_vel, base_ang_vel, projected_gravity, actions.
-    obs_term_scale: tuple[float, ...] = (1.0, 5.0, 2.0, 1.0, 1.0)
-    # Fixed goal feature scales: joint_pos NJ, joint_vel NJ, grav 3, ang_vel_b 3, lin_vel_h 3, height 1.
-    goal_term_scale: tuple[float, ...] = (1.0, 5.0, 1.0, 2.0, 1.0, 1.0)
+    # Fixed per-term observation scales (divide): joint_pos, joint_vel, base_ang_vel, projected_gravity, actions
+    # (and prop_pose with props).
+    obs_term_scale: tuple[float, ...] = (1.0, 5.0, 2.0, 1.0, 1.0) + ((1.0,) if ROBOT.props else ())
+    # Fixed goal feature scales: joint_pos NJ, joint_vel NJ, grav 3, ang_vel_b 3, lin_vel_h 3, height 1 (and prop poses 9P).
+    goal_term_scale: tuple[float, ...] = (1.0, 5.0, 1.0, 2.0, 1.0, 1.0) + ((1.0,) if ROBOT.props else ())
     decoder_last_gain: float = 0.01
     goal_dim: int = GOAL_DIM  # 680 for the G1 (+9 with anchor_obs)
 
@@ -44,7 +45,7 @@ def _obs_scale_vector(cfg: PolicyCfg) -> torch.Tensor:
 
 
 def _goal_scale_vector(cfg: PolicyCfg, goal_dim: int) -> torch.Tensor:
-    sizes = (ROBOT.nj, ROBOT.nj, 3, 3, 3, 1)
+    sizes = (ROBOT.nj, ROBOT.nj, 3, 3, 3, 1) + ((9 * ROBOT.num_props,) if ROBOT.props else ())
     per_frame = torch.cat([torch.full((n,), 1.0 / s) for n, s in zip(sizes, cfg.goal_term_scale)])
     k, extra = divmod(goal_dim, GOAL_FRAME_DIM)
     return torch.cat([per_frame.repeat(k), torch.ones(extra)])
@@ -90,7 +91,7 @@ class Critic(nn.Module):
 
     def __init__(self, cfg: CriticCfg, feat_dim: int | None = None, goal_dim: int | None = None, xi_dim: int | None = None, pcfg: PolicyCfg | None = None):
         super().__init__()
-        feat_dim = feat_dim or ROBOT.state_dim
+        feat_dim = feat_dim or ROBOT.feat_dim
         xi_dim = xi_dim or ROBOT.xi_dim
         pcfg = pcfg or PolicyCfg()
         goal_dim = goal_dim or pcfg.goal_dim

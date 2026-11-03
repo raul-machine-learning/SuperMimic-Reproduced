@@ -27,7 +27,8 @@ class WMTrainerCfg:
 def reference_at(lib: MotionLibrary, frame: torch.Tensor) -> ReferenceFrame:
     r = lib.ref(frame)
     b = lib.bodies(frame)
-    return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w, r.joint_pos)
+    pressed = lib.taxel_pressed[frame] if lib.taxel_pressed is not None else None
+    return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w, r.joint_pos, r.prop_pos_w, r.prop_quat_w, pressed)
 
 
 class WorldModelTrainer:
@@ -44,10 +45,11 @@ class WorldModelTrainer:
 
     def loss_on(self, w: WindowBatch):
         k, n = w.frame.shape
-        # Only the root pose and joints of the references are needed for the termination features.
+        # Only the root pose, joints and prop positions of the references are needed for the termination features.
         r = self.lib.ref(w.frame.reshape(-1))
         sl = [slice(j * n, (j + 1) * n) for j in range(k)]
-        refs = [ReferenceFrame(None, None, None, None, r.root_pos_w[s], r.root_quat_w[s], r.joint_pos[s]) for s in sl]
+        pp = r.prop_pos_w
+        refs = [ReferenceFrame(None, None, None, None, r.root_pos_w[s], r.root_quat_w[s], r.joint_pos[s], None if pp is None else pp[s]) for s in sl]
         return self.wm.window_loss(w.states, w.a_exec, w.xi, w.done, refs)
 
     def update(self, buffer: ReplayBuffer) -> dict[str, float]:

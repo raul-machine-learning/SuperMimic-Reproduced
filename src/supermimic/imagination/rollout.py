@@ -8,6 +8,7 @@ import torch
 
 from supermimic.data.replay_buffer import StartBatch
 from supermimic.envs.mdp.motion_library import MotionLibrary
+from supermimic.envs.tracking_env_cfg import PROP_OBS_NOISE
 from supermimic.imagination.compiled import REWARD_TERM_NAMES, ImagStep
 from supermimic.policy.nets import Policy
 from supermimic.robots import ROBOT
@@ -16,7 +17,7 @@ from supermimic.world_model.wm_trainer import reference_at
 from supermimic.world_model.world_model import WorldModel
 
 # Paper Table A.1 sensor noise (uniform half-widths) in the observation order (93-d for the G1).
-OBS_NOISE_HALF = torch.tensor([0.01] * ROBOT.nj + [0.5] * ROBOT.nj + [0.2] * 3 + [0.05] * 3 + [0.0] * ROBOT.na)
+OBS_NOISE_HALF = torch.tensor([0.01] * ROBOT.nj + [0.5] * ROBOT.nj + [0.2] * 3 + [0.05] * 3 + [0.0] * ROBOT.na + [PROP_OBS_NOISE] * (9 * ROBOT.num_props))
 ANCHOR_NOISE_HALF = torch.tensor([0.25] * 3 + [0.05] * 6)
 
 
@@ -84,8 +85,13 @@ def imagine(
 
     def ref_at(t):
         sl = slice(t * n, (t + 1) * n)
-        return ReferenceFrame(ref_all.body_pos_w[sl], ref_all.body_quat_w[sl], ref_all.body_lin_vel_w[sl], ref_all.body_ang_vel_w[sl], ref_all.root_pos_w[sl], ref_all.root_quat_w[sl], ref_all.joint_pos[sl])
+        return ReferenceFrame(*(None if v is None else v[sl] for v in vars(ref_all).values()))
 
+    a_offset_all = None
+    if ROBOT.residual_actions:
+        act = torch.tensor(ROBOT.joint_indices(ROBOT.actuated_joint_names), device=device)
+        inv_scale = 1.0 / torch.tensor(ROBOT.action_scale_vector(), device=device)
+        a_offset_all = ((ref_all.joint_pos[:, act] - q0[act]) * inv_scale).reshape(horizon + 1, n, -1)
     ref = ref_at(0)
     if anchor_obs:
         b0 = wm.heads.robot_bodies(s)
@@ -99,7 +105,7 @@ def imagine(
     for t in range(horizon):
         obs_flat = flatten_history_term_major(torch.stack(hist, 0))
         a = policy(obs_flat, goals[-1])
-        s_next, r, term_vec, logits, obs_clean, anchor_pose = step_fn(s, a, a_prev, start.xi, ref)
+        s_next, r, term_vec, logits, obs_clean, anchor_pose = step_fn(s, a, a_prev, start.xi, ref, None if a_offset_all is None else a_offset_all[t + 1])
         d = torch.sigmoid(logits)
         c = c * (1.0 - d)
         term_sum += term_vec.detach().mean(-1)

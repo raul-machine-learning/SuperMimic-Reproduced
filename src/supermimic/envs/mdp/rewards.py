@@ -14,6 +14,9 @@ manager (``scale_rewards_by_dt=True``).
 Robots with hands (``ROBOT.hand_joint_names``) get one more term, ``motion_hand_joint_pos``:
 ``exp(-mean_j (q_j - q_ref_j)^2 / std^2)`` over the actuated hand joints (the mimic followers are
 determined by them), implemented for the simulator by :func:`motion_hand_joint_position_error_exp`.
+Robots with props add ``motion_prop_pos`` / ``motion_prop_ori`` (world pose of each prop against its reference),
+and robots with a grip (``ROBOT.grip``) ``grip_glove``, the agreement of the touching taxels with the glove's
+pressed ones (``supermimic.kinematics.glove``).
 """
 
 from __future__ import annotations
@@ -53,11 +56,17 @@ class TrackingRewardCfg:
     w_joint_limit: float = -2.0
     std_hand_joint_pos: float = 0.3
     w_hand_joint_pos: float = field(default_factory=lambda: 1.0 if ROBOT.hand_joint_names else 0.0)
+    std_prop_pos: float = 0.05
+    std_prop_ori: float = 0.3
+    w_prop_pos: float = field(default_factory=lambda: 1.0 if ROBOT.props else 0.0)
+    w_prop_ori: float = field(default_factory=lambda: 0.5 if ROBOT.props else 0.0)
+    w_grip: float = field(default_factory=lambda: 1.0 if ROBOT.grip else 0.0)
     dt: float = 0.02
 
     @property
     def max_step_reward(self) -> float:
-        return self.dt * (self.w_body_pos + self.w_body_ori + self.w_body_lin_vel + self.w_body_ang_vel + self.w_root_pos + self.w_root_ori + self.w_hand_joint_pos)
+        return self.dt * (self.w_body_pos + self.w_body_ori + self.w_body_lin_vel + self.w_body_ang_vel + self.w_root_pos + self.w_root_ori
+                          + self.w_hand_joint_pos + self.w_prop_pos + self.w_prop_ori + self.w_grip)
 
 
 def reanchor_reference(
@@ -107,6 +116,11 @@ def tracking_reward_terms(
     cfg: TrackingRewardCfg,
     hand_joint_pos: torch.Tensor | None = None,  # (N, H)
     ref_hand_joint_pos: torch.Tensor | None = None,  # (N, H)
+    prop_pos_w: torch.Tensor | None = None,  # (N, P, 3)
+    prop_quat_w: torch.Tensor | None = None,  # (N, P, 4)
+    ref_prop_pos_w: torch.Tensor | None = None,
+    ref_prop_quat_w: torch.Tensor | None = None,
+    glove_agreement: torch.Tensor | None = None,  # (N, G) per grip hand, in [0, 1]
 ) -> dict[str, torch.Tensor]:
     """Per-term weighted, dt-scaled rewards (N,) plus 'total'."""
     ra_pos = robot_body_pos_w[..., anchor_index, :]
@@ -142,6 +156,13 @@ def tracking_reward_terms(
     if hand_joint_pos is not None:
         e_hand = ((hand_joint_pos - ref_hand_joint_pos) ** 2).mean(-1)
         terms["motion_hand_joint_pos"] = dt * cfg.w_hand_joint_pos * torch.exp(-e_hand / cfg.std_hand_joint_pos**2)
+    if prop_pos_w is not None:
+        e_prop_pos = ((prop_pos_w - ref_prop_pos_w) ** 2).sum(-1).mean(-1)
+        e_prop_ori = _sq_quat_err(ref_prop_quat_w, prop_quat_w).mean(-1)
+        terms["motion_prop_pos"] = dt * cfg.w_prop_pos * torch.exp(-e_prop_pos / cfg.std_prop_pos**2)
+        terms["motion_prop_ori"] = dt * cfg.w_prop_ori * torch.exp(-e_prop_ori / cfg.std_prop_ori**2)
+    if glove_agreement is not None:
+        terms["grip_glove"] = dt * cfg.w_grip * glove_agreement.mean(-1)
     total = terms["motion_global_root_pos"]
     for k, v in terms.items():
         if k != "motion_global_root_pos":
@@ -157,3 +178,38 @@ def motion_hand_joint_position_error_exp(env: ManagerBasedRlEnv, command_name: s
     cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
     err = ((cmd.robot_joint_pos[:, joint_ids] - cmd.joint_pos[:, joint_ids]) ** 2).mean(-1)
     return torch.exp(-err / std**2)
+
+
+def motion_prop_position_error_exp(env: ManagerBasedRlEnv, command_name: str, std: float) -> torch.Tensor:
+    """Simulator side of ``motion_prop_pos``: ``exp(-mean_k |p_k - p_ref_k|^2 / std^2)`` over the props."""
+    from supermimic.envs.mdp.commands import MultiClipMotionCommand
+
+    cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
+    return torch.exp(-((cmd.sim_prop_pos_w - cmd.prop_pos_w) ** 2).sum(-1).mean(-1) / std**2)
+
+
+def motion_prop_orientation_error_exp(env: ManagerBasedRlEnv, command_name: str, std: float) -> torch.Tensor:
+    from supermimic.envs.mdp.commands import MultiClipMotionCommand
+
+    cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
+    return torch.exp(-_sq_quat_err(cmd.prop_quat_w, cmd.sim_prop_quat_w).mean(-1) / std**2)
+
+
+def glove_agreement_sim(cmd) -> torch.Tensor:
+    """(N, G) glove agreement of the simulated hands (``GloveModel``, built once per command term)."""
+    from supermimic.kinematics.glove import GloveModel
+
+    glove = getattr(cmd, "_glove", None)
+    if glove is None:
+        names = cmd.robot.body_names
+        glove = cmd._glove = GloveModel(lambda b: torch.tensor([names.index(n) for n in b], device=cmd.device), cmd.device)
+    pos, quat = cmd.robot.data.body_link_pos_w, cmd.robot.data.body_link_quat_w
+    d = glove.distances(pos, quat, cmd.sim_prop_pos_w, cmd.sim_prop_quat_w)
+    return glove.agreement(glove.touching(d), cmd.taxel_pressed)
+
+
+def grip_glove_agreement(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+    """Simulator side of ``grip_glove``: the mean over the grip hands of the glove agreement."""
+    from supermimic.envs.mdp.commands import MultiClipMotionCommand
+
+    return glove_agreement_sim(cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))).mean(-1)

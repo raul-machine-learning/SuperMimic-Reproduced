@@ -30,12 +30,15 @@ class PropSceneCfg:
     table_half: tuple[float, float, float]
     masses: dict[str, float] = field(default_factory=lambda: {"broom": 0.10, "dustpan": 0.20})
     props_dir: Path = PROPS_DIR
+    # Initial pose (pos, quat wxyz) per prop: its first reference frame, so the props do not start overlapping.
+    init_pose: dict[str, tuple[tuple[float, ...], tuple[float, ...]]] = field(default_factory=dict)
 
     @staticmethod
     def from_clip(npz: str | Path, **kw) -> PropSceneCfg:
         with np.load(npz) as d:
             assert "prop_pos_w" in d, f"{npz} has no prop reference (scripts/data/add_props_to_clip.py)"
-            return PropSceneCfg(float(d["scene_scale"]), tuple(map(float, d["table_center"])), tuple(map(float, d["table_half"])), **kw)
+            init = {str(n): (tuple(map(float, d["prop_pos_w"][0, k])), tuple(map(float, d["prop_quat_w"][0, k]))) for k, n in enumerate(d["prop_names"])}
+            return PropSceneCfg(float(d["scene_scale"]), tuple(map(float, d["table_center"])), tuple(map(float, d["table_half"])), init_pose=init, **kw)
 
 
 def _prop_spec(name: str, scale: float, props_dir: Path) -> mujoco.MjSpec:
@@ -83,6 +86,14 @@ def prop_entity_cfgs(cfg: PropSceneCfg, props: tuple[str, ...]) -> dict[str, Ent
     """Scene entities: one per prop (in ``props`` order, after the robot), then the table."""
     out: dict[str, EntityCfg] = {}
     for n in props:
-        out[n] = EntityCfg(spec_fn=lambda n=n: prop_spec(n, cfg.scale, cfg.masses[n], cfg.props_dir))
+        pos, rot = cfg.init_pose.get(n, ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0)))
+
+        def spec_fn(n=n, pos=pos, rot=rot) -> mujoco.MjSpec:
+            # The free body's own pose is the model's qpos0 (mjlab puts init_state only in the keyframe).
+            spec = prop_spec(n, cfg.scale, cfg.masses[n], cfg.props_dir)
+            spec.body(n).pos, spec.body(n).quat = list(pos), list(rot)
+            return spec
+
+        out[n] = EntityCfg(spec_fn=spec_fn, init_state=EntityCfg.InitialStateCfg(pos=pos, rot=rot))
     out["table"] = EntityCfg(spec_fn=lambda: table_spec(cfg.table_half), init_state=EntityCfg.InitialStateCfg(pos=cfg.table_center))
     return out
