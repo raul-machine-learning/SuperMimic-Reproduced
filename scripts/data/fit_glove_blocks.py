@@ -16,15 +16,20 @@ to the prop -> each segment's force spread over its taxels -> the per-hand share
 pressure with their "nothing" share, as in ``GloveModel.pressure_agreement``. Loss: the squared error of the shares
 summed over the 130 bins, mean over frames, plus a small pull toward the neutral layout. Every 4th half-second of the
 holds is held out. Reports the loss and the overlap score (``pressure_agreement``) on the fit and held-out frames,
-writes ``glove_taxels.BLOCK_FIT_FILE`` (read by the glove reward) and checks the reward's ``GloveModel`` against it.
+writes ``glove_taxels.BLOCK_FIT_FILE`` (read by the glove reward), checks the reward's ``GloveModel`` against it
+and writes a picture of the fitted sensor positions on the hands (scripts/media/render_glove_blocks.py) to ``image``
+(default media/glove_block_fit_<shape>.png).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("MUJOCO_GL", "egl")
 import mujoco
 import numpy as np
 import torch
@@ -73,7 +78,8 @@ def shares(x: torch.Tensor, floor: float) -> torch.Tensor:
     return torch.cat([p, 1.0 - p.sum(-1, keepdim=True)], -1)
 
 
-def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool = True, device: str = "cuda:0", write: bool = True) -> None:
+def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool = True, device: str = "cuda:0", write: bool = True,
+         image: Path | None = None) -> None:
     from diag_pressure_blocks import BLOCKS
 
     from supermimic.data.glove_taxels import BLOCK_FIT_FILE, block_bounds, neutral_blocks, taxel_layout_torch
@@ -184,6 +190,10 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool =
         for h, S in enumerate(sides):
             m = hold[:, h]
             print(f"  reward's GloveModel with the fit: {S} overlap {agree[m, h].mean().item():.3f} on all holding frames")
+        spec = importlib.util.spec_from_file_location("render_glove_blocks", ROOT / "scripts/media/render_glove_blocks.py")
+        render = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(render)
+        render.main(image or ROOT / "media" / f"glove_block_fit_{HAND_SHAPE}.png")
 
 
 if __name__ == "__main__":
