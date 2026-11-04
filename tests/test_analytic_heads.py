@@ -53,6 +53,7 @@ def _ref_from_command(cmd):
         root_pos_w=lib.root_pos_w[f], root_quat_w=lib.root_quat_w[f], joint_pos=lib.joint_pos[f],
         prop_pos_w=r.prop_pos_w, prop_quat_w=r.prop_quat_w,
         taxel_pressed=lib.taxel_pressed[f] if ROBOT.grip else None,
+        grip_hold_early=lib.grip_hold_early[f].float() if ROBOT.grip else None,
     )
 
 
@@ -66,6 +67,15 @@ def test_reward_terms_match_mjlab(setup):
 
     env.reset()
     cmd = env.command_manager.get_term("motion")
+    if ROBOT.grip:
+        # Start inside the holding windows (with some envs before them), where the finger tracking is released.
+        lib = cmd.library
+        ids = torch.arange(env.num_envs, device=env.device)
+        cmd.reset_to_frame(ids, lib.clip_start[lib.frame_clip[cmd.frame]] + 100 + 8 * ids)
+        env.sim.forward()
+        cmd._refresh_ref()
+        cmd.update_relative_body_poses()
+        assert lib.grip_hold_early[cmd.frame].any(-1).float().mean() > 0.5
     worst = {}
     for step in range(25):
         act = 0.5 * torch.randn(env.num_envs, NA, device=env.device)
@@ -86,6 +96,11 @@ def test_reward_terms_match_mjlab(setup):
             "action_rate_l2": -0.1 * base_mdp.action_rate_l2(env),
             "joint_limit": -2.0 * base_mdp.joint_pos_limits(env, asset_cfg),
         }
+        if ROBOT.grip:
+            theirs["motion_body_pos"] = sm_rew.motion_body_position_released_exp(env, "motion", rc.std_body_pos)
+            theirs["motion_body_ori"] = sm_rew.motion_body_orientation_released_exp(env, "motion", rc.std_body_ori)
+            theirs["motion_body_lin_vel"] = sm_rew.motion_body_lin_vel_released_exp(env, "motion", rc.std_body_lin_vel)
+            theirs["motion_body_ang_vel"] = sm_rew.motion_body_ang_vel_released_exp(env, "motion", rc.std_body_ang_vel)
         if ROBOT.hand_joint_names:
             hand_ids = ROBOT.joint_indices(ROBOT.hand_joint_names)
             theirs["motion_hand_joint_pos"] = motion_hand_joint_position_error_exp(env, "motion", 0.3, hand_ids)

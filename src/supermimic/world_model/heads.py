@@ -89,6 +89,7 @@ class ReferenceFrame:
     prop_pos_w: torch.Tensor | None = None  # (N, P, 3); robots with props
     prop_quat_w: torch.Tensor | None = None  # (N, P, 4)
     taxel_pressed: torch.Tensor | None = None  # (N, G, 129); robots with a grip
+    grip_hold_early: torch.Tensor | None = None  # (N, G) anticipated holding flags (grip_assist.TrackingRelease)
 
 
 class AnalyticHeads:
@@ -115,11 +116,13 @@ class AnalyticHeads:
         self.hand_idx = torch.tensor(ROBOT.joint_indices(ROBOT.hand_joint_names), device=dev) if ROBOT.hand_joint_names else None
         self.default_joint_pos = default_joint_pos
         self.reward_cfg = reward_cfg or TrackingRewardCfg()
-        self.glove = None
+        self.glove = self.release = None
         if ROBOT.grip:
+            from supermimic.envs.mdp.grip_assist import TrackingRelease
             from supermimic.kinematics.glove import GloveModel
 
             self.glove = GloveModel(lambda names: torch.as_tensor(fk.body_indices(tuple(names)), device=dev), dev)
+            self.release = TrackingRelease(tuple(tracked_body_names), ROBOT.hand_joint_names, dev)
 
     def robot_bodies(self, s: torch.Tensor) -> dict[str, torch.Tensor]:
         out = self.fk(s[..., : ROBOT.nq], s[..., ROBOT.nq : ROBOT.robot_state_dim])
@@ -155,6 +158,8 @@ class AnalyticHeads:
             props = dict(prop_pos_w=prop_pos, prop_quat_w=prop_quat, ref_prop_pos_w=ref.prop_pos_w, ref_prop_quat_w=ref.prop_quat_w)
         if self.glove is not None:
             props["glove_agreement"] = self.glove_agreement(s_next, ref, b)
+        if self.release is not None:
+            props["body_weight"], props["hand_weight"] = self.release.weights(ref.grip_hold_early)
         return tracking_reward_terms(
             robot_body_pos_w=b["pos"],
             robot_body_quat_w=b["quat"],

@@ -30,6 +30,19 @@ def test_schedule_and_offsets():
         grip_assist.set_level(0.0)
 
 
+def test_tracking_release_weights():
+    rel = grip_assist.TrackingRelease(ROBOT.tracked_bodies, ROBOT.hand_joint_names, "cpu")
+    h = torch.zeros(2, len(ROBOT.grip))
+    h[1, 0] = 1.0  # first gripping hand holds in row 1
+    bw, hw = rel.weights(h)
+    side = ROBOT.grip[0][0]
+    assert (bw[0] == 1).all() and (hw[0] == 1).all()
+    for b, w in zip(ROBOT.tracked_bodies, bw[1].tolist()):
+        assert w == (0.0 if b.startswith(f"{side}_") and b != f"{side}_hand" else 1.0), b
+    for j, w in zip(ROBOT.hand_joint_names, hw[1].tolist()):
+        assert w == (0.0 if j.startswith(f"{side}_") else 1.0), j
+
+
 @requires_sweep
 def test_library_holding_flags():
     from supermimic.envs.mdp.motion_library import GOAL_FEAT_DIM, MotionLibrary

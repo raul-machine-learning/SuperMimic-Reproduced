@@ -92,6 +92,11 @@ def reanchor_reference(
     return rel_pos, rel_quat
 
 
+def weighted_mean(e: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+    """Mean over the last axis with weights; 0 when every weight is 0 (nothing left to track)."""
+    return (e * w).sum(-1) / w.sum(-1).clamp(min=1e-6)
+
+
 def _sq_quat_err(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     """Squared geodesic angle between quaternions, smooth at zero (== quat_error_magnitude**2)."""
     v = quat_box_minus(q1, q2)
@@ -121,8 +126,11 @@ def tracking_reward_terms(
     ref_prop_pos_w: torch.Tensor | None = None,
     ref_prop_quat_w: torch.Tensor | None = None,
     glove_agreement: torch.Tensor | None = None,  # (N, G) per grip hand, in [0, 1]
+    body_weight: torch.Tensor | None = None,  # (N, B) 0 for bodies released from tracking (grip_assist.TrackingRelease)
+    hand_weight: torch.Tensor | None = None,  # (N, H) same for the hand joints
 ) -> dict[str, torch.Tensor]:
     """Per-term weighted, dt-scaled rewards (N,) plus 'total'."""
+    body_mean = (lambda e: e.mean(-1)) if body_weight is None else (lambda e: weighted_mean(e, body_weight))
     ra_pos = robot_body_pos_w[..., anchor_index, :]
     ra_quat = robot_body_quat_w[..., anchor_index, :]
     ma_pos = ref_body_pos_w[..., anchor_index, :]
@@ -131,10 +139,10 @@ def tracking_reward_terms(
 
     e_root_pos = ((ma_pos - ra_pos) ** 2).sum(-1)
     e_root_ori = _sq_quat_err(ma_quat, ra_quat)
-    e_body_pos = ((rel_pos - robot_body_pos_w) ** 2).sum(-1).mean(-1)
-    e_body_ori = _sq_quat_err(rel_quat, robot_body_quat_w).mean(-1)
-    e_body_lin = ((ref_body_lin_vel_w - robot_body_lin_vel_w) ** 2).sum(-1).mean(-1)
-    e_body_ang = ((ref_body_ang_vel_w - robot_body_ang_vel_w) ** 2).sum(-1).mean(-1)
+    e_body_pos = body_mean(((rel_pos - robot_body_pos_w) ** 2).sum(-1))
+    e_body_ori = body_mean(_sq_quat_err(rel_quat, robot_body_quat_w))
+    e_body_lin = body_mean(((ref_body_lin_vel_w - robot_body_lin_vel_w) ** 2).sum(-1))
+    e_body_ang = body_mean(((ref_body_ang_vel_w - robot_body_ang_vel_w) ** 2).sum(-1))
 
     lo = soft_limits[..., 0]
     hi = soft_limits[..., 1]
@@ -154,7 +162,8 @@ def tracking_reward_terms(
         "joint_limit": dt * cfg.w_joint_limit * joint_limit,
     }
     if hand_joint_pos is not None:
-        e_hand = ((hand_joint_pos - ref_hand_joint_pos) ** 2).mean(-1)
+        e = (hand_joint_pos - ref_hand_joint_pos) ** 2
+        e_hand = e.mean(-1) if hand_weight is None else weighted_mean(e, hand_weight)
         terms["motion_hand_joint_pos"] = dt * cfg.w_hand_joint_pos * torch.exp(-e_hand / cfg.std_hand_joint_pos**2)
     if prop_pos_w is not None:
         e_prop_pos = ((prop_pos_w - ref_prop_pos_w) ** 2).sum(-1).mean(-1)
@@ -176,8 +185,43 @@ def motion_hand_joint_position_error_exp(env: ManagerBasedRlEnv, command_name: s
     from supermimic.envs.mdp.commands import MultiClipMotionCommand
 
     cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
-    err = ((cmd.robot_joint_pos[:, joint_ids] - cmd.joint_pos[:, joint_ids]) ** 2).mean(-1)
+    e = (cmd.robot_joint_pos[:, joint_ids] - cmd.joint_pos[:, joint_ids]) ** 2
+    err = e.mean(-1) if not ROBOT.grip else weighted_mean(e, tracking_release_weights(cmd)[1])
     return torch.exp(-err / std**2)
+
+
+def tracking_release_weights(cmd) -> tuple[torch.Tensor, torch.Tensor]:
+    """(N, B) tracked-body and (N, H) hand-joint weights of the current frame (``grip_assist.TrackingRelease``)."""
+    rel = getattr(cmd, "_release", None)
+    if rel is None:
+        from supermimic.envs.mdp.grip_assist import TrackingRelease
+
+        rel = cmd._release = TrackingRelease(ROBOT.tracked_bodies, ROBOT.hand_joint_names, cmd.device)
+    return rel.weights(cmd.library.grip_hold_early[cmd.frame])
+
+
+def _released_body_term(env: ManagerBasedRlEnv, command_name: str, std: float, error) -> torch.Tensor:
+    from supermimic.envs.mdp.commands import MultiClipMotionCommand
+
+    cmd = cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))
+    return torch.exp(-weighted_mean(error(cmd), tracking_release_weights(cmd)[0]) / std**2)
+
+
+# mjlab's body tracking terms with the finger bodies of holding hands left out (robots with a grip).
+def motion_body_position_released_exp(env: ManagerBasedRlEnv, command_name: str, std: float) -> torch.Tensor:
+    return _released_body_term(env, command_name, std, lambda c: ((c.body_pos_relative_w - c.robot_body_pos_w) ** 2).sum(-1))
+
+
+def motion_body_orientation_released_exp(env: ManagerBasedRlEnv, command_name: str, std: float) -> torch.Tensor:
+    return _released_body_term(env, command_name, std, lambda c: _sq_quat_err(c.body_quat_relative_w, c.robot_body_quat_w))
+
+
+def motion_body_lin_vel_released_exp(env: ManagerBasedRlEnv, command_name: str, std: float) -> torch.Tensor:
+    return _released_body_term(env, command_name, std, lambda c: ((c.body_lin_vel_w - c.robot_body_lin_vel_w) ** 2).sum(-1))
+
+
+def motion_body_ang_vel_released_exp(env: ManagerBasedRlEnv, command_name: str, std: float) -> torch.Tensor:
+    return _released_body_term(env, command_name, std, lambda c: ((c.body_ang_vel_w - c.robot_body_ang_vel_w) ** 2).sum(-1))
 
 
 def motion_prop_position_error_exp(env: ManagerBasedRlEnv, command_name: str, std: float) -> torch.Tensor:

@@ -208,6 +208,10 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         "action_rate_l2": RewardTermCfg(func=base_mdp.action_rate_l2, weight=rc.w_action_rate),
         "joint_limit": RewardTermCfg(func=base_mdp.joint_pos_limits, weight=a.joint_limit_weight, params={"asset_cfg": SceneEntityCfg("robot", joint_names=limit_joints)}),
     }
+    if ROBOT.grip:
+        for name, func in (("motion_body_pos", sm_rew.motion_body_position_released_exp), ("motion_body_ori", sm_rew.motion_body_orientation_released_exp),
+                           ("motion_body_lin_vel", sm_rew.motion_body_lin_vel_released_exp), ("motion_body_ang_vel", sm_rew.motion_body_ang_vel_released_exp)):
+            rewards[name] = RewardTermCfg(func=func, weight=rewards[name].weight, params=rewards[name].params)
     if ROBOT.hand_joint_names:
         rewards["motion_hand_joint_pos"] = RewardTermCfg(
             func=motion_hand_joint_position_error_exp, weight=rc.w_hand_joint_pos,

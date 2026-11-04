@@ -47,6 +47,22 @@ def offsets(joint_names: tuple[str, ...] | list[str], device) -> torch.Tensor:
     return out
 
 
+class TrackingRelease:
+    """While a glove holds (anticipated flags), its hand's finger bodies and finger joints leave the tracking terms:
+    the mocap finger pose barely touches the prop, so tracking it fights the grasp, and the prop and glove-pattern
+    rewards score the fingers instead. The wrist body (``{S}_hand``) stays tracked. Not annealed."""
+
+    def __init__(self, body_names: tuple[str, ...], hand_joint_names: tuple[str, ...], device):
+        sides = [s for s, _ in ROBOT.grip]
+        self.body = torch.tensor([[b.startswith(f"{s}_") and b != f"{s}_hand" for b in body_names] for s in sides], dtype=torch.float32, device=device)
+        self.hand = torch.tensor([[j.startswith(f"{s}_") for j in hand_joint_names] for s in sides], dtype=torch.float32, device=device)
+
+    def weights(self, hold_early: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """(..., G) flags -> body weights (..., B) and hand-joint weights (..., H), 0 for released items."""
+        h = hold_early.float()
+        return 1.0 - (h @ self.body).clamp(max=1.0), 1.0 - (h @ self.hand).clamp(max=1.0)
+
+
 def assist_offset(hold_early: torch.Tensor, full: torch.Tensor) -> torch.Tensor | None:
     """(..., A) set-point offset in rad from the (..., G) anticipated holding flags; None when off."""
     if _level == 0.0 or not ROBOT.grip_assist:
