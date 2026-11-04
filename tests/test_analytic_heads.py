@@ -52,7 +52,7 @@ def _ref_from_command(cmd):
         body_lin_vel_w=lib.body_lin_vel_w[f], body_ang_vel_w=lib.body_ang_vel_w[f],
         root_pos_w=lib.root_pos_w[f], root_quat_w=lib.root_quat_w[f], joint_pos=lib.joint_pos[f],
         prop_pos_w=r.prop_pos_w, prop_quat_w=r.prop_quat_w,
-        taxel_force=lib.taxel_force[f] if ROBOT.grip else None,
+        taxel_load=lib.taxel_load[f] if ROBOT.grip else None,
         grip_hold_early=lib.grip_hold_early[f].float() if ROBOT.grip else None,
     )
 
@@ -113,7 +113,7 @@ def test_reward_terms_match_mjlab(setup):
             theirs["motion_prop_pos"] = rc.w_prop_pos * sm_rew.motion_prop_position_error_exp(env, "motion", rc.std_prop_pos)
             theirs["motion_prop_ori"] = rc.w_prop_ori * sm_rew.motion_prop_orientation_error_exp(env, "motion", rc.std_prop_ori)
         if ROBOT.grip:
-            theirs["grip_force"] = rc.w_grip * sm_rew.grip_force_agreement(env, "motion")
+            theirs["grip_pressure"] = rc.w_grip * sm_rew.grip_pressure_agreement(env, "motion")
         assert set(theirs) == set(ours) - {"total"}
         for k, v in theirs.items():
             d = (ours[k] / 0.02 - v).abs().max().item()

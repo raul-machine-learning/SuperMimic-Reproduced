@@ -10,10 +10,10 @@ by slerp; velocities by central differences. Body link states come from MuJoCo F
 
 Also written, for the scene with props: the broom and dustpan reference (prop_*_w), the table, scene_scale 1
 (the hands are at human scale), ``hand_loaded`` (all False: the grip reward reads the glove itself) and
-``taxel_pressed`` (T, 2, 129), the glove taxels pressed at each frame (left, right; sweep_mocap.taxel_pressed),
-cleared on frames where fewer than ``min_pressed`` of a hand's taxels read pressed and in holds shorter than
-``min_hold`` seconds (sensor noise of a free hand), and ``taxel_load`` (T, 2, 129), the graded load above the rest
-baseline (raw glove units, sweep_mocap.taxel_load) on the frames where that hand holds, below ``load_floor`` set to 0.
+``taxel_load`` (T, 2, 129), the glove pressure above each taxel's rest baseline (raw glove units, left, right;
+sweep_mocap.taxel_load), readings below ``load_floor`` set to 0. A hand holds on the frames where its total pressure
+exceeds ``hold_rel`` of its clip 95th percentile (and ``hold_floor``), in holds of at least ``min_hold`` seconds;
+outside them its pressure is set to 0 (the resting fit of a free glove).
 """
 
 from __future__ import annotations
@@ -30,12 +30,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.npz",
-         out: Path = ROOT / "data/npz/capsule_hands/sweep_task023.npz", fps: float = 50.0, min_pressed: int = 10,
-         min_hold: float = 0.5, load_floor: float = 3.0) -> None:
+         out: Path = ROOT / "data/npz/capsule_hands/sweep_task023.npz", fps: float = 50.0, min_hold: float = 0.5,
+         load_floor: float = 3.0, hold_rel: float = 0.35, hold_floor: float = 30.0) -> None:
     from supermimic.data.motion_convert import ResampledMotion, _so3_derivative, forward_kinematics
     from supermimic.robots import ROBOT
 
-    from supermimic.data.sweep_mocap import taxel_load, taxel_pressed
+    from supermimic.data.sweep_mocap import taxel_load
 
     assert ROBOT.name.startswith("capsule_hands"), "run with SM_ROBOT=capsule_hands"
     z = np.load(src)
@@ -89,15 +89,16 @@ def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.np
         lin.append(np.gradient(p, dt, axis=0))
         ang.append(_so3_derivative(q, dt))
 
-    pressed = np.stack([taxel_pressed(z[f"pressure_{s}"], z["pressure_times"], t) for s in ("left", "right")], 1)
-    pressed &= pressed.sum(2, keepdims=True) >= min_pressed
+    load = np.stack([taxel_load(z[f"pressure_{s}"], z["pressure_times"], t) for s in ("left", "right")], 1)
+    load = np.where(load > load_floor, load, 0.0)
+    total = load.sum(2)  # (T, 2)
+    hold = total > np.maximum(hold_rel * np.percentile(total, 95, axis=0), hold_floor)
     for k in range(2):
-        edge = np.diff(np.r_[0, pressed[:, k].any(1).astype(int), 0])
+        edge = np.diff(np.r_[0, hold[:, k].astype(int), 0])
         for a, b in zip(np.nonzero(edge == 1)[0], np.nonzero(edge == -1)[0]):
             if b - a < min_hold * fps:
-                pressed[a:b, k] = False
-    load = np.stack([taxel_load(z[f"pressure_{s}"], z["pressure_times"], t) for s in ("left", "right")], 1)
-    load = np.where((load > load_floor) & pressed.any(2, keepdims=True), load, 0.0)
+                hold[a:b, k] = False
+    load *= hold[..., None]
 
     f32 = lambda a: np.asarray(a, np.float32)  # noqa: E731
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -110,11 +111,12 @@ def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.np
         prop_pos_w=f32(np.stack(pos, 1)), prop_quat_w=f32(np.stack(quat, 1)), prop_lin_vel_w=f32(np.stack(lin, 1)), prop_ang_vel_w=f32(np.stack(ang, 1)),
         table_center=f32(z["table_center"]), table_half=f32(z["table_half"]), scene_scale=np.array(1.0),
         hand_loaded=np.zeros((T, len(ROBOT.hand_joint_names)), bool), hand_loaded_joints=np.array(ROBOT.hand_joint_names),
-        taxel_pressed=pressed, taxel_load=f32(load),
+        taxel_load=f32(load),
     )
     for k, S in enumerate("LR"):
-        g = np.nonzero(pressed[:, k].any(1))[0]
-        print(f"  {S} glove: holding {t[g[0]]:.2f}-{t[g[-1]]:.2f} s, {pressed[g, k].sum(1).mean():.1f} pressed taxels per frame")
+        g = np.nonzero(hold[:, k])[0]
+        print(f"  {S} glove: holding {t[g[0]]:.2f}-{t[g[-1]]:.2f} s ({len(g)} frames), total pressure median {np.median(total[g, k]):.0f} raw, "
+              f"{(load[g, k] > 0).sum(1).mean():.1f} loaded taxels per frame")
     speed = {S: np.linalg.norm(np.gradient(wrist_pos[S], dt, axis=0), axis=1) for S in "LR"}
     print(f"wrote {out}: {T} frames ({(T - 1) / fps:.1f} s at {fps:g} Hz), FK wrist error {err_p * 1000:.3f} mm / {err_r:.4f} deg")
     for S in "LR":

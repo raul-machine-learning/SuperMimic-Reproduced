@@ -1,17 +1,19 @@
-"""Glove-pattern grip term of the capsule hands (torch, differentiable).
+"""Glove pressure grip term of the capsule hands (torch, differentiable).
 
 Each hand's 129 glove taxels sit at fixed points of its bodies (``supermimic.data.glove_taxels``, the layout fitted
-to the glove's pressed pattern). A taxel *touches* the prop it holds (``ROBOT.grip``) with a smooth indicator of its
-signed distance to the prop surface, ``sigmoid((TOUCH - d) / SOFT)``, the same contact model the layout fit used;
-``d`` is read from the prop's signed-distance grid (scripts/assets/build_prop_sdf.py) by trilinear interpolation.
+to the glove's pattern). The simulated taxels measure pressure: the simulator reads the contact normal force between
+each taxel-carrying body (``body_names``, the *force bodies*) and the held prop (``ROBOT.grip``), and
+``taxel_forces`` spreads a body's force over its taxels by where the body meets the prop, estimated from each
+taxel's signed distance ``d`` to the prop surface (``proximity``: ``sigmoid((NEAR - d) / SOFT)`` plus a small uniform
+share, so a contact off the taxels still counts); ``d`` is read from the prop's signed-distance grid
+(scripts/assets/build_prop_sdf.py) by trilinear interpolation.
 
-The grip is scored on force. The simulator measures the contact normal force between each taxel-carrying body
-(``body_names``, the *force bodies*) and the held prop; ``taxel_forces`` spreads a body's force over its taxels in
-proportion to how much each touches (plus a small uniform share, so a contact off the taxels still counts). The
-reference is the glove's load above its rest baseline (clip key ``taxel_load``) times ``NEWTONS_PER_UNIT``.
-``force_agreement`` is the overlap ``(2 sum min(F, R) + C) / (sum F + sum R + C)``: 1 when every taxel carries the
-glove's force (also when the hand is free and pushes on nothing), lower when the hand squeezes too hard, too
-softly or in other places than the glove.
+The glove is uncalibrated, so the comparison is relative: ``pressure_agreement`` divides each pattern, the simulated
+taxel forces and the glove's pressure above its rest baseline (clip key ``taxel_load``), by its own total plus a
+small floor, and sums the overlap ``min(p, q)`` over the taxels plus over the floor's share (the "nothing" bin).
+It is 1 when the hand presses where the glove does in the same proportions (at any overall strength), also when
+both press on nothing; it falls when pressure sits on other taxels, is distributed differently, or when one side
+presses and the other does not.
 """
 
 from __future__ import annotations
@@ -30,15 +32,12 @@ from supermimic.robots import ASSETS, ROBOT
 HANDS_XML = ASSETS / "capsule_hands/capsule_hands.xml"
 PROPS_DIR = Path(__file__).resolve().parents[3] / "data/props"
 PROP_SOURCES = {"broom": "cleaningtools_broom", "dustpan": "cleaningtools_dustpan"}
-TOUCH = 0.005  # m: closer than this counts as touching
-SOFT = 0.002  # m: width of the smooth indicator
+NEAR = 0.005  # m: taxels nearer the prop than this take most of their body's force
+SOFT = 0.002  # m: width of the smooth proximity weight
 NTAXEL = 129
-# The glove reads raw units, not newtons. Calibrated once on this simulator: the median holding load of each glove
-# (392 and 315 units) against the median contact normal force with which the trained policy (logs/capsule_grip_s3,
-# iteration 7000) carries the broom and dustpan (16.7 and 11.3 N); scripts/diag_grip_forces.py.
-NEWTONS_PER_UNIT = 0.04
 OFF_TAXEL_SHARE = 0.02  # uniform weight of every taxel of a body when spreading its force
-FORCE_SMOOTH = 1.0  # N, C of force_agreement
+SIM_PRESSURE_FLOOR = 0.5  # N: "nothing" share of the simulated pattern
+GLOVE_PRESSURE_FLOOR = 10.0  # raw glove units: same for the glove (a holding glove reads a few hundred in total)
 
 
 def body_names() -> list[list[str]]:
@@ -102,17 +101,20 @@ class GloveModel:
         return torch.stack(out, dim=-2)
 
     @staticmethod
-    def touching(d: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid((TOUCH - d) / SOFT)
+    def proximity(d: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid((NEAR - d) / SOFT)
 
     def taxel_forces(self, d: torch.Tensor, body_force: torch.Tensor) -> torch.Tensor:
-        """Per-taxel force (…, H, 129) from the force bodies' normal forces (…, H, B), spread by touch (``d``: …, H, 129)."""
-        w = self.touching(d) + OFF_TAXEL_SHARE
+        """Per-taxel force (…, H, 129) from the force bodies' normal forces (…, H, B), spread by proximity (``d``: …, H, 129)."""
+        w = self.proximity(d) + OFF_TAXEL_SHARE
         per_body = torch.einsum("...ht,htb->...hb", w, self.onehot)
         share = w / torch.einsum("...hb,htb->...ht", per_body, self.onehot)
         return share * torch.einsum("...hb,htb->...ht", body_force, self.onehot)
 
     @staticmethod
-    def force_agreement(force: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
-        """Overlap (…, H) of the taxel forces (…, H, 129) with the glove's (…, H, 129), both in newtons."""
-        return (2.0 * torch.minimum(force, ref).sum(-1) + FORCE_SMOOTH) / (force.sum(-1) + ref.sum(-1) + FORCE_SMOOTH)
+    def pressure_agreement(force: torch.Tensor, load: torch.Tensor) -> torch.Tensor:
+        """Relative overlap (…, H) in [0, 1] of the simulated taxel forces (…, H, 129, N) with the glove's pressure
+        (…, H, 129, raw units)."""
+        p = force / (force.sum(-1, keepdim=True) + SIM_PRESSURE_FLOOR)
+        q = load / (load.sum(-1, keepdim=True) + GLOVE_PRESSURE_FLOOR)
+        return torch.minimum(p, q).sum(-1) + torch.minimum(1.0 - p.sum(-1), 1.0 - q.sum(-1))

@@ -88,7 +88,7 @@ class ReferenceFrame:
     joint_pos: torch.Tensor | None = None  # (N, NJ); needed by the hand reward only
     prop_pos_w: torch.Tensor | None = None  # (N, P, 3); robots with props
     prop_quat_w: torch.Tensor | None = None  # (N, P, 4)
-    taxel_force: torch.Tensor | None = None  # (N, G, 129) glove force per taxel (N); robots with a grip
+    taxel_load: torch.Tensor | None = None  # (N, G, 129) glove pressure per taxel (raw units); robots with a grip
     grip_hold_early: torch.Tensor | None = None  # (N, G) anticipated holding flags (grip_assist.TrackingRelease)
 
 
@@ -145,10 +145,10 @@ class AnalyticHeads:
         return self.glove.distances(bodies["all_pos"], bodies["all_quat"], prop_pos, prop_quat)
 
     def grip_agreement(self, d: torch.Tensor, body_force: torch.Tensor, ref: ReferenceFrame) -> torch.Tensor:
-        """(N, G) force agreement with the glove from the taxel distances ``d`` and the force bodies' normal forces
+        """(N, G) pressure agreement with the glove from the taxel distances ``d`` and the force bodies' normal forces
         (N, G, B): measured by the simulator or predicted by the world model's force head."""
         assert self.glove is not None
-        return self.glove.force_agreement(self.glove.taxel_forces(d, body_force), ref.taxel_force)
+        return self.glove.pressure_agreement(self.glove.taxel_forces(d, body_force), ref.taxel_load)
 
     def reward(self, s_next: torch.Tensor, action: torch.Tensor, prev_action: torch.Tensor, ref: ReferenceFrame, bodies=None,
                grip: tuple[torch.Tensor, torch.Tensor] | None = None):

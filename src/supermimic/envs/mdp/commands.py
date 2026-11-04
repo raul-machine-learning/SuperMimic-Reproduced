@@ -161,14 +161,9 @@ class MultiClipMotionCommand(CommandTerm):
         return self.library.hand_loaded[self.frame]
 
     @property
-    def taxel_pressed(self) -> torch.Tensor:
-        """(N,H,129) glove taxels pressed in the reference, for the hands of ``ROBOT.grip``."""
-        return self.library.taxel_pressed[self.frame]
-
-    @property
-    def taxel_force(self) -> torch.Tensor:
-        """(N,H,129) glove force (N) on each taxel in the reference, for the hands of ``ROBOT.grip``."""
-        return self.library.taxel_force[self.frame]
+    def taxel_load(self) -> torch.Tensor:
+        """(N,H,129) glove pressure per taxel in the reference (raw units above the rest baseline), hands of ``ROBOT.grip``."""
+        return self.library.taxel_load[self.frame]
 
     # ------------------------------------------------------------------ robot
 

@@ -24,7 +24,7 @@ class WorldModelCfg:
     height_threshold: float = ROBOT.termination_thresholds[0]
     tilt_threshold: float = ROBOT.termination_thresholds[1]
     # Grip force head (robots with a grip): hidden sizes and loss weight.
-    force_hidden: tuple[int, ...] = (512, 512)
+    force_hidden: tuple[int, ...] = (1024, 1024)
     force_loss_weight: float = 1.0
 
 
@@ -44,24 +44,25 @@ class TerminationHead(nn.Module):
 
 class ForceHead(nn.Module):
     """Contact normal force (N) of each gripping hand's force bodies on its prop in a state: from the state's
-    canonical features, the set-point that drives the fingers (position servos push in proportion to how far it
-    lies inside the prop) and the taxels' signed distances to the prop (``AnalyticHeads.grip_distances``)."""
+    canonical features, the servo push of every actuated joint (set-point minus position, in action units: position
+    servos press in proportion to it) and the taxels' signed distances to the prop (``AnalyticHeads.grip_distances``)."""
 
     D_CLIP = (-0.01, 0.03)  # m
     D_SCALE = 0.01  # m
 
-    def __init__(self, feat_dim: int, act_dim: int, hands: int, bodies: int, hidden=(512, 512)):
+    def __init__(self, feat_dim: int, act_dim: int, hands: int, bodies: int, hidden=(1024, 1024)):
         super().__init__()
         from supermimic.kinematics.glove import NTAXEL
 
         self.hands, self.bodies = hands, bodies
         self.mlp = MLP(feat_dim + act_dim + 2 * hands * NTAXEL, tuple(hidden), hands * bodies)
+        nn.init.constant_(self.mlp.net[-1].bias, -3.0)  # about 0.05 N per body before any data
 
-    def forward(self, feat: torch.Tensor, action: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
-        """feat (…, FEAT), action (…, A), d (…, G, 129) -> (…, G, B) forces >= 0."""
+    def forward(self, feat: torch.Tensor, push: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
+        """feat (…, FEAT), push (…, A), d (…, G, 129) -> (…, G, B) forces >= 0."""
         from supermimic.kinematics.glove import GloveModel
 
-        x = torch.cat([feat, action, (d.clamp(*self.D_CLIP) / self.D_SCALE).flatten(-2), GloveModel.touching(d).flatten(-2)], dim=-1)
+        x = torch.cat([feat, push, (d.clamp(*self.D_CLIP) / self.D_SCALE).flatten(-2), GloveModel.proximity(d).flatten(-2)], dim=-1)
         return F.softplus(self.mlp(x)).unflatten(-1, (self.hands, self.bodies))
 
 
@@ -82,6 +83,9 @@ class WorldModel(nn.Module):
             from supermimic.envs.mdp.grip_force import num_bodies
 
             self.force_head = ForceHead(ROBOT.feat_dim, ROBOT.na, len(ROBOT.grip), num_bodies(), cfg.force_hidden)
+            self.register_buffer("act_idx", torch.tensor(ROBOT.joint_indices(ROBOT.actuated_joint_names)), persistent=False)
+            self.register_buffer("act_q0", heads.default_joint_pos[self.act_idx].clone(), persistent=False)
+            self.register_buffer("act_scale", torch.tensor(ROBOT.action_scale_vector()), persistent=False)
         self.heads = heads  # analytic observation / reward / FK (no parameters)
         self.to(device)
 
@@ -99,7 +103,9 @@ class WorldModel(nn.Module):
         assert self.force_head is not None
         b = bodies if bodies is not None else self.heads.robot_bodies(s_next)
         d = self.heads.grip_distances(s_next, b)
-        return d, self.force_head(self.spec.canonical(s_next), action, d)
+        q = ROBOT.split_state(s_next)[2][..., self.act_idx]
+        push = action - (q - self.act_q0) / self.act_scale
+        return d, self.force_head(self.spec.canonical(s_next), push, d)
 
     def termination_logits(self, s_next: torch.Tensor, ref: ReferenceFrame) -> torch.Tensor:
         # Termination features read the root pose or the wrist joints straight from the state: no FK needed.
@@ -108,25 +114,27 @@ class WorldModel(nn.Module):
 
     # ------------------------------------------------------------------ Eq. 1
 
-    def _loss_step(self, s, a, xi, s_true, done, ref_root_pos, ref_root_quat, ref_joint_pos, ref_prop_pos=None, f_true=None):
-        """One autoregressive step of Eq. 1: returns (s_next, sq_err (n,70), term_bce (n,), logits (n,), force loss (n,)
-        and absolute force error (n,) in N, or None without ``f_true`` (n, G*B))."""
+    def _loss_step(self, s, a, xi, s_true, done, ref_root_pos, ref_root_quat, ref_joint_pos, ref_prop_pos=None):
+        """One autoregressive step of Eq. 1: returns (s_next, sq_err (n,70), term_bce (n,), logits (n,))."""
         s_next = self.step(s, a, xi)
         e = self.spec.error_vector(s_next, s_true)
         feats = self.heads.termination_features(s_next, ReferenceFrame(None, None, None, None, ref_root_pos, ref_root_quat, ref_joint_pos, ref_prop_pos))
         logits = self.term_head(feats)
         bce = F.binary_cross_entropy_with_logits(logits, done, reduction="none")
-        fl = f_err = None
-        if f_true is not None:
-            # The force labels train the head only: a millimetre-sensitive contact loss must not reshape the dynamics.
-            pred = self.grip_forces(s_next.detach(), a)[1]
-            true = f_true.view_as(pred)
-            fl = force_loss(pred, true)
-            f_err = (pred - true).abs().mean((-2, -1))
-        return s_next, e * e, bce, logits, fl, f_err
+        return s_next, e * e, bce, logits
+
+    def _force_step(self, s, a, f_true):
+        """Force head loss (n,) and mean absolute error (n,) in N on logged states s (n, S) reached under a (n, A),
+        labels (n, G*B). Fit on the logged states, not on the autoregressive predictions: contact forces change
+        within millimetres, and a head fit to drifted states learns blurred forces and phantom contacts."""
+        pred = self.grip_forces(s, a)[1]
+        true = f_true.view_as(pred)
+        return force_loss(pred, true), (pred - true).abs().mean((-2, -1))
 
     def enable_compile(self, mode: str | None = "default") -> None:
-        self._loss_step_fn = torch.compile(self._loss_step, mode=None if mode == "default" else mode, dynamic=False) if mode else self._loss_step
+        compile_fn = (lambda f: torch.compile(f, mode=None if mode == "default" else mode, dynamic=False)) if mode else (lambda f: f)
+        self._loss_step_fn = compile_fn(self._loss_step)
+        self._force_step_fn = compile_fn(self._force_step)
 
     def window_loss(self, states: torch.Tensor, a_exec: torch.Tensor, xi: torch.Tensor, done: torch.Tensor, refs: list[ReferenceFrame],
                     mask: torch.Tensor | None = None, forces: torch.Tensor | None = None):
@@ -149,9 +157,9 @@ class WorldModel(nn.Module):
         force_mae = 0.0
         use_force = forces is not None and self.force_head is not None
         step_fn = getattr(self, "_loss_step_fn", None) or self._loss_step
+        force_fn = getattr(self, "_force_step_fn", None) or self._force_step
         for j in range(k):
-            s, sq, bce, logits, fl, f_err = step_fn(s, a_exec[j], xi, states[j + 1], done[j], refs[j].root_pos_w, refs[j].root_quat_w, refs[j].joint_pos,
-                                                    refs[j].prop_pos_w, forces[j + 1] if use_force else None)
+            s, sq, bce, logits = step_fn(s, a_exec[j], xi, states[j + 1], done[j], refs[j].root_pos_w, refs[j].root_quat_w, refs[j].joint_pos, refs[j].prop_pos_w)
             if mask is None:
                 mean = lambda x: x.mean()  # noqa: E731
             else:
@@ -160,6 +168,7 @@ class WorldModel(nn.Module):
             total_state = total_state + mean(sq.sum(-1))
             total_term = total_term + mean(bce)
             if use_force:
+                fl, f_err = force_fn(states[j + 1], a_exec[j], forces[j + 1])
                 total_force = total_force + mean(fl)
                 force_mae = force_mae + mean(f_err).detach()
             with torch.no_grad():

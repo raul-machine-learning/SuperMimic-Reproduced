@@ -5,7 +5,11 @@
 Without ``--rollout`` it replays the mocap clip kinematically (wrist poses, hinge angles, prop poses). With
 ``--rollout`` it plays a physics rollout stored on the same keys (``times``, ``base_pos``, ``base_quat``,
 ``joint_pos``, ``prop_pos``, ``prop_quat``, optional ``contact`` (T, 2, n_links) bool per hand link). The mocap hand
-joints are drawn as small dark dots, the mocap props as translucent ghosts when the props are simulated.
+joints are drawn as small dark dots (``mocap_dots``), the mocap props as translucent ghosts when the props are simulated.
+
+``taxels``: draw the 129 glove taxels of each hand on the drawn hand's own bodies (the layout of
+supermimic.data.glove_taxels, placed from the drawn body poses every frame, so they ride on the fingers), colored by
+the rollout's simulated pressure ``taxel_sim`` (T, 2, 129, N; per hand relative to its largest taxel) when present.
 Left panel: the scene; right: close-ups of the left and right hands.
 """
 
@@ -84,21 +88,31 @@ def draw_legend(im: Image.Image, xy: tuple[int, int], rows: list[tuple[int, str]
         dr.text((x + 34, yy), s, font=font_small, fill=(230, 235, 245, 255))
 
 
-def add_dots(scene: mujoco.MjvScene, pts: np.ndarray, radius: float = 0.0035) -> None:
-    for p in pts:
+def add_dots(scene: mujoco.MjvScene, pts: np.ndarray, radius: float = 0.0035, rgba: np.ndarray | None = None) -> None:
+    for i, p in enumerate(pts):
         if scene.ngeom >= scene.maxgeom:
             return
-        mujoco.mjv_initGeom(scene.geoms[scene.ngeom], mujoco.mjtGeom.mjGEOM_SPHERE, [radius, 0, 0], p, np.eye(3).ravel(),
-                            np.array([0.10, 0.10, 0.15, 1.0], np.float32))
+        c = np.array([0.10, 0.10, 0.15, 1.0], np.float32) if rgba is None else rgba[i].astype(np.float32)
+        mujoco.mjv_initGeom(scene.geoms[scene.ngeom], mujoco.mjtGeom.mjGEOM_SPHERE, [radius, 0, 0], p, np.eye(3).ravel(), c)
         scene.ngeom += 1
+
+
+def pressure_rgba(f: np.ndarray) -> np.ndarray:
+    """(129,) simulated taxel forces -> colors: dark blue unpressed, yellow to red by the share of the hand's peak."""
+    rel = f / f.max() if f.max() > 0.05 else np.zeros_like(f)
+    out = np.tile([0.10, 0.20, 0.75, 1.0], (len(f), 1))
+    on = rel > 0.02
+    out[on, :3] = np.stack([np.ones(on.sum()), 0.9 * (1 - rel[on]), 0.1 * (1 - rel[on])], -1)
+    return out
 
 
 def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", rollout: Path | None = None, mocap_dir: Path | None = None,
          title: str = "Capsule hands: mocap replay", subtitle: str = "kinematic replay, no physics", fps: int = 30,
          width: int = 1600, height: int = 900, hand_distance: float = 0.42, view_yaw: float = 35.0, ghosts: bool | None = None,
-         legend: str | None = None) -> None:
+         legend: str | None = None, taxels: bool = False, mocap_dots: bool = True, palm_view: bool = False) -> None:
     """``ghosts``: draw the mocap props translucent (default: for physics rollouts); ``legend``: audit | physics
-    (default: from the rollout's keys)."""
+    (default: from the rollout's keys); ``palm_view``: the hand close-ups look at the palm (following it) with the
+    props see-through there."""
     c = dict(np.load(clip))
     r = dict(np.load(rollout)) if rollout else c
     mocap_dir = mocap_dir or Path(str(c["mocap_dir"]))
@@ -120,6 +134,20 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", ro
             ids = [model.body(str(n)).id for n in r[f"body_names_{S}"]]
             state_geoms[S] = [[g for g in range(model.ngeom) if model.geom_bodyid[g] == b] for b in ids]
     base_rgba = model.geom_rgba.copy()
+    if taxels:
+        from supermimic.data.glove_taxels import fitted_adjust, taxel_layout, world_taxels
+
+        layouts = [taxel_layout(model, S, fitted_adjust()) for S in sides]
+    if palm_view:
+        from supermimic.data.glove_taxels import fitted_adjust, taxel_layout
+
+        palm_body = {S: model.body(f"{S}_hand").id for S in sides}
+        palm_normal = {}
+        for S in sides:
+            lay = taxel_layout(model, S, fitted_adjust())
+            n = lay.normal[lay.body == palm_body[S]].mean(0)
+            palm_normal[S] = n / np.linalg.norm(n)
+        prop_geoms = [g for g in range(model.ngeom) if model.body(model.geom_bodyid[g]).name in props]
     legend_rows = LEGENDS.get(legend or ("audit" if "gap" in r else "physics" if "body_state" in r else ""), [])
 
     W2, H2 = width // 2, height // 2
@@ -165,6 +193,10 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", ro
 
         focus = {"main": c["base_pos"][tc].mean(0) * [1, 1, 0] + [0, 0, c["table_center"][2] * 2 + 0.05],
                  **{S: data.xpos[hand_bodies[S][0]].copy() for S in sides}}
+        if palm_view:
+            for S in sides:
+                n = data.xmat[palm_body[S]].reshape(3, 3) @ palm_normal[S]
+                focus[f"{S}_n"] = n
         for k, f in focus.items():
             targets[k] = f if k not in targets else 0.85 * targets[k] + 0.15 * f
         tiles = {}
@@ -172,9 +204,21 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", ro
                                       ("R", r_hand, hand_distance, facing + 40, -30)):
             cam = cams[k]
             cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+            if palm_view and k in sides:
+                n = targets[f"{k}_n"] / np.linalg.norm(targets[f"{k}_n"])  # camera on the palm side, looking back at it
+                az, el = np.degrees(np.arctan2(-n[1], -n[0])), np.degrees(np.arcsin(np.clip(-n[2], -0.95, 0.95)))
+                model.geom_rgba[prop_geoms, 3] = 0.3
             cam.lookat[:], cam.distance, cam.azimuth, cam.elevation = targets[k], dist, az, el
             rend.update_scene(data, cam)
-            add_dots(rend.scene, c["human_hand_pos"][tc])
+            if palm_view:
+                model.geom_rgba[prop_geoms, 3] = base_rgba[prop_geoms, 3]
+            if mocap_dots:
+                add_dots(rend.scene, c["human_hand_pos"][tc])
+            if taxels:
+                for h, lay in enumerate(layouts):
+                    pos, nrm = world_taxels(data, lay)
+                    rgba = pressure_rgba(r["taxel_sim"][t, h]) if "taxel_sim" in r else None
+                    add_dots(rend.scene, pos + 0.0015 * nrm, 0.0032, rgba)
             tiles[k] = rend.render().copy()
         frame = np.zeros((height, width, 3), np.uint8)
         frame[:, :W2] = tiles["main"]
@@ -183,12 +227,20 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", ro
         im = Image.fromarray(frame)
         ImageDraw.Draw(im).line([(W2, 0), (W2, height)], fill=(30, 30, 30), width=2)
         ImageDraw.Draw(im).line([(W2, H2), (width, H2)], fill=(30, 30, 30), width=2)
-        label(im, (14, 14), [title, f"t = {times[t] - times[0]:4.1f} s   ({subtitle})", "dark dots: mocap hand joints"]
+        label(im, (14, 14), [title, f"t = {times[t] - times[0]:4.1f} s   ({subtitle})"]
+              + (["dark dots: mocap hand joints"] if mocap_dots else [])
+              + (["dots on the hands: 129 glove sensor points per hand, moving with the simulated fingers",
+                  "color: simulated pressure (blue none, yellow to red = share of the hand's peak)"] if taxels else [])
               + (["translucent props: mocap poses"] if ghost_of else []), font, font_small)
         if legend_rows:
             draw_legend(im, (14, height - 20 - 24 * len(legend_rows)), legend_rows, font_small)
         for S, y0 in (("L", 10), ("R", H2 + 10)):
-            label(im, (W2 + 10, y0), [f"{'left' if S == 'L' else 'right'} hand", "21 hinges, capsules from the mocap bones"], font, font_small)
+            info = "21 hinges, capsules from the mocap bones" + (" (palm side, props see-through)" if palm_view else "")
+            if "pressure_agreement" in r:
+                k = sides.index(S)
+                info = (f"glove pressure agreement {r['pressure_agreement'][t, k]:.2f}"
+                        + ("  (glove holding)" if r["ref_holding"][t, k] else "  (glove free)") + ("; palm side, props see-through" if palm_view else ""))
+            label(im, (W2 + 10, y0), [f"{'left' if S == 'L' else 'right'} hand", info], font, font_small)
         ff.stdin.write(np.asarray(im).tobytes())
     ff.stdin.close()
     ff.wait()

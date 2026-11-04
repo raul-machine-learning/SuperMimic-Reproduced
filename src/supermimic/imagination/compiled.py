@@ -24,7 +24,7 @@ REWARD_TERM_NAMES = (
     "action_rate_l2",
     "joint_limit",
 ) + (("motion_hand_joint_pos",) if ROBOT.hand_joint_names else ()) + (("motion_prop_pos", "motion_prop_ori") if ROBOT.props else ()) + (
-    ("grip_force",) if ROBOT.grip else ()
+    ("grip_pressure",) if ROBOT.grip else ()
 )
 
 

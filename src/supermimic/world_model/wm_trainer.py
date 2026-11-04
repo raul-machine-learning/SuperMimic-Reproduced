@@ -31,9 +31,9 @@ class WMTrainerCfg:
 def reference_at(lib: MotionLibrary, frame: torch.Tensor) -> ReferenceFrame:
     r = lib.ref(frame)
     b = lib.bodies(frame)
-    force = lib.taxel_force[frame] if lib.taxel_force is not None else None
+    load = lib.taxel_load[frame] if lib.taxel_load is not None else None
     hold = lib.grip_hold_early[frame].float() if lib.grip_hold_early is not None else None
-    return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w, r.joint_pos, r.prop_pos_w, r.prop_quat_w, force, hold)
+    return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w, r.joint_pos, r.prop_pos_w, r.prop_quat_w, load, hold)
 
 
 def _zero_nonfinite_grads(params, grad_norm: torch.Tensor) -> None:

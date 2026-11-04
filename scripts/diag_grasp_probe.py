@@ -14,7 +14,7 @@ import tyro
 
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp.motion_library import discover_npz
-from supermimic.envs.mdp.rewards import grip_force_agreement_sim
+from supermimic.envs.mdp.rewards import grip_pressure_agreement_sim
 from supermimic.robots import ROBOT
 
 
@@ -36,7 +36,7 @@ def main(closings: list[float], clip: str = "sweep_task023", npz_dir: Path = Pat
         scale = torch.tensor(ROBOT.action_scale_vector(), device=device)
         flex = torch.stack([torch.tensor([j.startswith(s) and j.endswith("_flex") for j in names], device=device) for s, _ in ROBOT.grip])  # (G, A)
         # Holding per frame, switched on `anticipate` frames early so the fingers close before the lift.
-        hold = lib.taxel_pressed.amax(-1) > 0.5  # (N, G)
+        hold = lib.grip_hold  # (N, G)
         early = hold.clone()
         for d in range(1, anticipate + 1):
             early[:-d] |= hold[d:]
@@ -60,7 +60,7 @@ def main(closings: list[float], clip: str = "sweep_task023", npz_dir: Path = Pat
             lift = torch.maximum(lift, (cmd.sim_prop_pos_w[..., 2] - z0) * live)
             err += (cmd.sim_prop_pos_w - cmd.prop_pos_w).norm(dim=-1) * live
             hn = hold[cmd.frame].float() * live
-            agree += grip_force_agreement_sim(env, cmd) * hn
+            agree += grip_pressure_agreement_sim(env, cmd) * hn
             nhold += hn
         L = lib.clips[0].length
         for i in range(n):

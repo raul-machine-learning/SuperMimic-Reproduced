@@ -221,7 +221,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         rewards["motion_prop_pos"] = RewardTermCfg(func=sm_rew.motion_prop_position_error_exp, weight=rc.w_prop_pos, params={"command_name": "motion", "std": rc.std_prop_pos})
         rewards["motion_prop_ori"] = RewardTermCfg(func=sm_rew.motion_prop_orientation_error_exp, weight=rc.w_prop_ori, params={"command_name": "motion", "std": rc.std_prop_ori})
     if ROBOT.grip:
-        rewards["grip_force"] = RewardTermCfg(func=sm_rew.grip_force_agreement, weight=rc.w_grip, params={"command_name": "motion"})
+        rewards["grip_pressure"] = RewardTermCfg(func=sm_rew.grip_pressure_agreement, weight=rc.w_grip, params={"command_name": "motion"})
 
     # ---------------------------------------------------------------- terminations
     terminations = {
