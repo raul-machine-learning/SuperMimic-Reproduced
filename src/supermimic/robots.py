@@ -568,11 +568,11 @@ ROBOTS["capsule_hands_props"] = replace(
     # From scripts/diag_grasp_search.py: replayed on the reference without perturbations, these carry the broom (2.3 cm
     # mean error, 7 cm lift) and the dustpan (about 1.5 cm, 23 cm lift); the dustpan grasp was refined under the
     # training perturbations (--robust). The broom grip needs the thumb opposed and the fingers adducted.
-    # Box hands: 1.2 cm / 6 cm lift on the broom, 0.8 cm / 25 cm on the dustpan.
+    # Box hands: 1.2 cm / 6 cm lift on the broom; the dustpan grasp is the --robust elite mean.
     grip_assist=_grasp_offsets("L", 0.83, 0.47, 0.46, -0.51, 0.28, 0.44, 0.38, 0.05, 0.64)
     + _grasp_offsets("R", 0.69, 0.15, 0.67, -0.28, 0.30, -0.37, 0.72, 0.41, 0.67) if HAND_SHAPE == "capsule" else
     _grasp_offsets("L", 0.29, 0.17, 0.93, 0.46, 0.09, -0.02, 0.49, 0.23, 0.16)
-    + _grasp_offsets("R", 0.27, 0.33, 0.20, -0.07, -0.05, -0.26, 0.04, 0.00, 0.98),
+    + _grasp_offsets("R", 0.50, 0.47, 0.35, -0.16, 0.43, -0.62, 0.05, -0.14, 1.07),
 )
 
 
