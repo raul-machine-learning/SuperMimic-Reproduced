@@ -155,6 +155,40 @@ def test_taxels_ride_on_simulated_capsules():
         env.close()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+@requires_sweep
+def test_mocap_pose_pressure_agreement():
+    """Hands and props placed at the mocap pose at mid-grip frames, one physics step: the simulated taxel pressure
+    agrees with the glove's at those frames better than with the glove's taxels scrambled. The mean is the ceiling
+    the mocap pose itself reaches (about 0.2 per hand on the sweep clip)."""
+    from supermimic.envs import SuperMimicEnvCfgArgs, make_env
+    from supermimic.envs.mdp.rewards import grip_pressure_agreement_sim, sim_glove, sim_taxel_forces
+    from supermimic.envs.state_io import StateIO
+
+    times = [3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]  # s, inside both hands' holds
+    env = make_env(SuperMimicEnvCfgArgs(npz_files=sweep_files(1), num_envs=len(times), obs_noise=False, reset_noise=False,
+                                        domain_randomization=False, action_noise_std=0.0, sampling_mode="start", seed=0), "cuda:0")
+    try:
+        cmd = env.command_manager.get_term("motion")
+        lib = cmd.library
+        frames = lib.clip_start[0] + torch.tensor([round(t * 50) for t in times], device=env.device)
+        cmd.forced_frame[:] = frames
+        env.reset()
+        start = cmd.frame.clone()
+        StateIO(env).write(torch.arange(env.num_envs, device=env.device), lib._ref[start].float())
+        env.step(torch.zeros(env.num_envs, ROBOT.na, device=env.device))
+        assert torch.equal(cmd.frame, start + 1) and lib.grip_hold[cmd.frame].all()
+        force = sim_taxel_forces(env, cmd)  # (n, G, 129) N
+        matched = grip_pressure_agreement_sim(env, cmd)  # (n, G)
+        scrambled = sim_glove(cmd).pressure_agreement(force, cmd.taxel_load.roll(17, -1))
+        print("mocap-pose pressure agreement per hand", matched.mean(0).tolist(), "taxels scrambled", scrambled.mean(0).tolist())
+        assert ((force.sum(-1) > 0.5).float().mean(0) >= 0.6).all()  # the mocap hands press on their props
+        assert (matched.mean(0) > 0.15).all(), matched.mean(0)
+        assert (matched.mean(0) > scrambled.mean(0) + 0.05).all(), (matched.mean(0), scrambled.mean(0))
+    finally:
+        env.close()
+
+
 @requires_sweep
 def test_force_head_fits_logged_states_only():
     from supermimic.data.motion_convert import load_robot_model
