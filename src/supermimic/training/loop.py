@@ -103,6 +103,8 @@ class Trainer:
         self._utd_acc = 0.0
         if cfg.resume is not None:
             self.load(cfg.resume)
+        elif cfg.init_from is not None:
+            self.init_weights(cfg.init_from)
 
     # ------------------------------------------------------------------ checkpoints
 
@@ -141,6 +143,17 @@ class Trainer:
         self.start_iteration = self.iteration
         self.num_updates = ck["num_updates"]
         print(f"[INFO] resumed from {path} at iteration {self.iteration}")
+
+    def init_weights(self, path: Path) -> None:
+        ck = torch.load(path, map_location=self.device, weights_only=False)
+        missing, unexpected = self.wm.load_state_dict(ck["wm"], strict=False)
+        if unexpected:
+            raise ValueError(f"{path}: unexpected world-model parameters {unexpected}")
+        self.policy.load_state_dict(ck["policy"])
+        self.critic.load_state_dict(ck["critic"])
+        for m in (self.wm, self.policy, self.critic):
+            broadcast_params(m)
+        print(f"[INFO] networks from {path} (iteration {ck['iteration']}); new world-model parameters: {sorted({k.split('.')[0] for k in missing})}")
 
     # ------------------------------------------------------------------ main loop
 
@@ -195,7 +208,9 @@ class Trainer:
                     torch.cuda.synchronize()
                     timers["wm"] += time.perf_counter() - t0
                     t0 = time.perf_counter()
-                    for _ in range(sch.policy_updates_per_wm_update):
+                    m_pi = {}
+                    policy_on = self.iteration - self.start_iteration >= sch.warmup_iterations + sch.policy_warmup_iterations
+                    for _ in range(sch.policy_updates_per_wm_update if policy_on else 0):
                         m_pi = self.policy_trainer.update(self.buffer)
                     torch.cuda.synchronize()
                     timers["policy"] += time.perf_counter() - t0
@@ -258,7 +273,7 @@ class Trainer:
                         f"wm nse1 {agg.get('wm/nse_1step', float('nan'))/max(agg_n,1):.4f} nse8 {(float(err[-1]) if err is not None else float('nan')):.4f} | "
                         f"imag_ret {agg.get('policy/imag_return_undisc', float('nan'))/max(agg_n,1):.3f} surv {agg.get('policy/imag_survival_H', float('nan'))/max(agg_n,1):.3f} | "
                         f"t sim/wm/pi {timers['sim']:.1f}/{timers['wm']:.1f}/{timers['policy']:.1f}s"
-                        + (f" | grip assist {grip_assist.level():.0%}" if ROBOT.grip else "")
+                        + (f" | grip assist {grip_assist.level():.0%} | wm force err {agg.get('wm/force_mae_n', float('nan'))/max(agg_n,1):.3f} N" if ROBOT.grip else "")
                     )
                     print(msg, flush=True)
                 agg, agg_n = {}, 0

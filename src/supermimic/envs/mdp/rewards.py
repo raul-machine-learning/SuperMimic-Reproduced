@@ -15,8 +15,9 @@ Robots with hands (``ROBOT.hand_joint_names``) get one more term, ``motion_hand_
 ``exp(-mean_j (q_j - q_ref_j)^2 / std^2)`` over the actuated hand joints (the mimic followers are
 determined by them), implemented for the simulator by :func:`motion_hand_joint_position_error_exp`.
 Robots with props add ``motion_prop_pos`` / ``motion_prop_ori`` (world pose of each prop against its reference),
-and robots with a grip (``ROBOT.grip``) ``grip_glove``, the agreement of the touching taxels with the glove's
-pressed ones (``supermimic.kinematics.glove``).
+and robots with a grip (``ROBOT.grip``) ``grip_force``, the agreement of the hands' contact forces on the props,
+per taxel, with the glove's (``supermimic.kinematics.glove``). The simulator measures those forces with contact
+sensors; the world model predicts them with its force head.
 """
 
 from __future__ import annotations
@@ -125,7 +126,7 @@ def tracking_reward_terms(
     prop_quat_w: torch.Tensor | None = None,  # (N, P, 4)
     ref_prop_pos_w: torch.Tensor | None = None,
     ref_prop_quat_w: torch.Tensor | None = None,
-    glove_agreement: torch.Tensor | None = None,  # (N, G) per grip hand, in [0, 1]
+    grip_agreement: torch.Tensor | None = None,  # (N, G) per grip hand, in [0, 1]
     body_weight: torch.Tensor | None = None,  # (N, B) 0 for bodies released from tracking (grip_assist.TrackingRelease)
     hand_weight: torch.Tensor | None = None,  # (N, H) same for the hand joints
 ) -> dict[str, torch.Tensor]:
@@ -170,8 +171,8 @@ def tracking_reward_terms(
         e_prop_ori = _sq_quat_err(ref_prop_quat_w, prop_quat_w).mean(-1)
         terms["motion_prop_pos"] = dt * cfg.w_prop_pos * torch.exp(-e_prop_pos / cfg.std_prop_pos**2)
         terms["motion_prop_ori"] = dt * cfg.w_prop_ori * torch.exp(-e_prop_ori / cfg.std_prop_ori**2)
-    if glove_agreement is not None:
-        terms["grip_glove"] = dt * cfg.w_grip * glove_agreement.mean(-1)
+    if grip_agreement is not None:
+        terms["grip_force"] = dt * cfg.w_grip * grip_agreement.mean(-1)
     total = terms["motion_global_root_pos"]
     for k, v in terms.items():
         if k != "motion_global_root_pos":
@@ -239,21 +240,33 @@ def motion_prop_orientation_error_exp(env: ManagerBasedRlEnv, command_name: str,
     return torch.exp(-_sq_quat_err(cmd.prop_quat_w, cmd.sim_prop_quat_w).mean(-1) / std**2)
 
 
-def glove_agreement_sim(cmd) -> torch.Tensor:
-    """(N, G) glove agreement of the simulated hands (``GloveModel``, built once per command term)."""
+def sim_glove(cmd):
+    """``GloveModel`` of the simulated robot, built once per command term."""
     from supermimic.kinematics.glove import GloveModel
 
     glove = getattr(cmd, "_glove", None)
     if glove is None:
         names = cmd.robot.body_names
         glove = cmd._glove = GloveModel(lambda b: torch.tensor([names.index(n) for n in b], device=cmd.device), cmd.device)
-    pos, quat = cmd.robot.data.body_link_pos_w, cmd.robot.data.body_link_quat_w
-    d = glove.distances(pos, quat, cmd.sim_prop_pos_w, cmd.sim_prop_quat_w)
-    return glove.agreement(glove.touching(d), cmd.taxel_pressed)
+    return glove
 
 
-def grip_glove_agreement(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """Simulator side of ``grip_glove``: the mean over the grip hands of the glove agreement."""
+def sim_taxel_forces(env: ManagerBasedRlEnv, cmd) -> torch.Tensor:
+    """(N, G, 129) taxel forces (N) of the simulated hands: the contact sensors' body forces spread by touch."""
+    from supermimic.envs.mdp.grip_force import body_forces
+
+    glove = sim_glove(cmd)
+    d = glove.distances(cmd.robot.data.body_link_pos_w, cmd.robot.data.body_link_quat_w, cmd.sim_prop_pos_w, cmd.sim_prop_quat_w)
+    return glove.taxel_forces(d, body_forces(env))
+
+
+def grip_force_agreement_sim(env: ManagerBasedRlEnv, cmd) -> torch.Tensor:
+    """(N, G) force agreement of the simulated hands with the glove (``GloveModel.force_agreement``)."""
+    return sim_glove(cmd).force_agreement(sim_taxel_forces(env, cmd), cmd.taxel_force)
+
+
+def grip_force_agreement(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+    """Simulator side of ``grip_force``: the mean over the grip hands of the force agreement."""
     from supermimic.envs.mdp.commands import MultiClipMotionCommand
 
-    return glove_agreement_sim(cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))).mean(-1)
+    return grip_force_agreement_sim(env, cast(MultiClipMotionCommand, env.command_manager.get_term(command_name))).mean(-1)

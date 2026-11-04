@@ -19,7 +19,7 @@ import tyro
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp import grip_assist
 from supermimic.envs.mdp.motion_library import discover_npz
-from supermimic.envs.mdp.rewards import TrackingRewardCfg, glove_agreement_sim
+from supermimic.envs.mdp.rewards import TrackingRewardCfg, sim_glove, sim_taxel_forces
 from supermimic.envs.state_io import NQ, StateIO
 from supermimic.eval.benchmark import load_policy_from_checkpoint
 from supermimic.robots import ROBOT
@@ -50,7 +50,7 @@ def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed
         obs, _ = env.reset()
         cmd.forced_frame[:] = lib.clip_start[env_clip]  # keep the clip if an env is reset again
         max_r = TrackingRewardCfg().max_step_reward  # paper reward upper bound per step (G1: dt * 5)
-        rob, ref, props, grip = [], [], [], []
+        rob, ref, props, grip, taxel_force = [], [], [], [], []
         alive = torch.ones(n, dtype=torch.bool, device=device)
         rew_sum = torch.zeros(n, device=device)
         steps = torch.zeros(n, dtype=torch.long, device=device)
@@ -62,7 +62,9 @@ def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed
                 props.append(s[:, ROBOT.robot_state_dim :].reshape(n, ROBOT.num_props, 13)[..., :7].cpu().numpy())
                 g = [(cmd.sim_prop_pos_w - cmd.prop_pos_w).norm(dim=-1)]  # (n, P) prop position error
                 if ROBOT.grip:
-                    g += [glove_agreement_sim(cmd), cmd.taxel_pressed.amax(-1)]  # (n, G) agreement, holding in the reference
+                    f = sim_taxel_forces(env, cmd)
+                    g += [sim_glove(cmd).force_agreement(f, cmd.taxel_force), cmd.taxel_pressed.amax(-1)]  # (n, G) agreement, holding in the reference
+                    taxel_force.append(torch.stack([f, cmd.taxel_force], 2).cpu().numpy().astype(np.float16))  # (n, G, 2, 129) sim, glove
                 grip.append(torch.cat(g, -1).cpu().numpy())
             ref.append(lib.ref_qpos_qvel(cmd.frame)[0].cpu().numpy())
 
@@ -99,14 +101,17 @@ def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed
             P, G = ROBOT.num_props, len(ROBOT.grip)
             extra["prop_err"] = g[..., :P]
             if G:
-                extra["glove_agreement"], extra["ref_holding"] = g[..., P : P + G], g[..., P + G :] > 0.5
+                extra["grip_force_agreement"], extra["ref_holding"] = g[..., P : P + G], g[..., P + G :] > 0.5
+                extra["taxel_force"] = np.stack(taxel_force, 1)[:, :T]  # (n, T, G, 2, 129) N: simulated, glove
             for i in range(n):
                 L = int(lengths[i])
                 line = "  props: " + ", ".join(f"{p} error mean {g[i, :L, k].mean() * 100:.1f} cm max {g[i, :L, k].max() * 100:.1f} cm"
                                                f", lift {(prop_qpos[i, :L, k, 2].max() - prop_qpos[i, 0, k, 2]) * 100:.1f} cm" for k, p in enumerate(ROBOT.props))
                 for h, (side, prop) in enumerate(ROBOT.grip):
                     hold = g[i, :L, P + G + h] > 0.5
-                    line += f" | {side} glove agreement holding {g[i, :L, P + h][hold].mean():.3f} free {g[i, :L, P + h][~hold].mean():.3f}"
+                    tf = extra["taxel_force"][i, :L, h].astype(np.float32).sum(-1)  # (L, 2)
+                    line += (f" | {side} force agreement holding {g[i, :L, P + h][hold].mean():.3f} free {g[i, :L, P + h][~hold].mean():.3f}, "
+                             f"grip {np.median(tf[hold, 0]):.1f} N (glove {np.median(tf[hold, 1]):.1f} N)")
                 print(line)
         np.savez_compressed(out, names=np.array(names), robot_qpos=robot_qpos[:, :T], ref_qpos=ref_qpos[:, :T], lengths=lengths, norm_return=norm_return, **extra)
         for i, nm in enumerate(names):

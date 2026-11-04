@@ -31,9 +31,9 @@ class WMTrainerCfg:
 def reference_at(lib: MotionLibrary, frame: torch.Tensor) -> ReferenceFrame:
     r = lib.ref(frame)
     b = lib.bodies(frame)
-    pressed = lib.taxel_pressed[frame] if lib.taxel_pressed is not None else None
+    force = lib.taxel_force[frame] if lib.taxel_force is not None else None
     hold = lib.grip_hold_early[frame].float() if lib.grip_hold_early is not None else None
-    return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w, r.joint_pos, r.prop_pos_w, r.prop_quat_w, pressed, hold)
+    return ReferenceFrame(b.pos_w, b.quat_w, b.lin_vel_w, b.ang_vel_w, r.root_pos_w, r.root_quat_w, r.joint_pos, r.prop_pos_w, r.prop_quat_w, force, hold)
 
 
 def _zero_nonfinite_grads(params, grad_norm: torch.Tensor) -> None:
@@ -63,7 +63,7 @@ class WorldModelTrainer:
         sl = [slice(j * n, (j + 1) * n) for j in range(k)]
         pp = r.prop_pos_w
         refs = [ReferenceFrame(None, None, None, None, r.root_pos_w[s], r.root_quat_w[s], r.joint_pos[s], None if pp is None else pp[s]) for s in sl]
-        return self.wm.window_loss(w.states, w.a_exec, w.xi, w.done, refs, w.mask)
+        return self.wm.window_loss(w.states, w.a_exec, w.xi, w.done, refs, w.mask, w.forces)
 
     def update(self, buffer: ReplayBuffer) -> dict[str, float]:
         agg: dict[str, torch.Tensor] = {}

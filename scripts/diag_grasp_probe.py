@@ -14,7 +14,7 @@ import tyro
 
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp.motion_library import discover_npz
-from supermimic.envs.mdp.rewards import glove_agreement_sim
+from supermimic.envs.mdp.rewards import grip_force_agreement_sim
 from supermimic.robots import ROBOT
 
 
@@ -60,7 +60,7 @@ def main(closings: list[float], clip: str = "sweep_task023", npz_dir: Path = Pat
             lift = torch.maximum(lift, (cmd.sim_prop_pos_w[..., 2] - z0) * live)
             err += (cmd.sim_prop_pos_w - cmd.prop_pos_w).norm(dim=-1) * live
             hn = hold[cmd.frame].float() * live
-            agree += glove_agreement_sim(cmd) * hn
+            agree += grip_force_agreement_sim(env, cmd) * hn
             nhold += hn
         L = lib.clips[0].length
         for i in range(n):

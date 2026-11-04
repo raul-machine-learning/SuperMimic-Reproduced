@@ -221,7 +221,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         rewards["motion_prop_pos"] = RewardTermCfg(func=sm_rew.motion_prop_position_error_exp, weight=rc.w_prop_pos, params={"command_name": "motion", "std": rc.std_prop_pos})
         rewards["motion_prop_ori"] = RewardTermCfg(func=sm_rew.motion_prop_orientation_error_exp, weight=rc.w_prop_ori, params={"command_name": "motion", "std": rc.std_prop_ori})
     if ROBOT.grip:
-        rewards["grip_glove"] = RewardTermCfg(func=sm_rew.grip_glove_agreement, weight=rc.w_grip, params={"command_name": "motion"})
+        rewards["grip_force"] = RewardTermCfg(func=sm_rew.grip_force_agreement, weight=rc.w_grip, params={"command_name": "motion"})
 
     # ---------------------------------------------------------------- terminations
     terminations = {
@@ -248,9 +248,15 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
     if a.record_transitions:
         recorders["replay"] = ReplayRecorderCfg(params={"capacity": a.replay_capacity, "foot_geom_regex": FOOT_GEOM_REGEX, "com_body_name": ROBOT.com_body})
 
+    sensors = ()
+    if ROBOT.grip:
+        from supermimic.envs.mdp.grip_force import sensor_cfgs
+
+        sensors = sensor_cfgs()
+
     cfg = ManagerBasedRlEnvCfg(
         scene=SceneCfg(terrain=TerrainEntityCfg(terrain_type="plane"), num_envs=a.num_envs, entities=entities,
-                       env_spacing=0.0 if ROBOT.fixed_root else 2.0),
+                       env_spacing=0.0 if ROBOT.fixed_root else 2.0, sensors=sensors),
         observations=observations,
         actions=actions,
         commands=commands,

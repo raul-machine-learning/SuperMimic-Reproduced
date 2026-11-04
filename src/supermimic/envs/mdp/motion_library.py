@@ -125,6 +125,7 @@ class MotionLibrary:
         ref_chunks: list[np.ndarray] = []
         loaded_chunks: list[np.ndarray] = []
         pressed_chunks: list[np.ndarray] = []
+        load_chunks: list[np.ndarray] = []
         nh = len(ROBOT.hand_joint_names)
         body_chunks = {"pos": [], "quat": [], "lin": [], "ang": []}
         # A single packed cache (build_library.py) can stand in for the npz list (compact mode only).
@@ -158,10 +159,11 @@ class MotionLibrary:
                 else:
                     loaded_chunks.append(np.zeros((n, nh), np.float32))
                 if ROBOT.grip:
-                    if "taxel_pressed" not in d:
+                    if "taxel_pressed" not in d or "taxel_load" not in d:
                         raise ValueError(f"{f} has no glove reference (scripts/data/make_rig_clip.py)")
                     sides = ["LR".index(s) for s, _ in ROBOT.grip]
                     pressed_chunks.append(d["taxel_pressed"][:, sides].astype(np.float32))
+                    load_chunks.append(d["taxel_load"][:, sides].astype(np.float32))
                 if not compact:
                     body_chunks["pos"].append(bp[:, body_idx])
                     body_chunks["quat"].append(bq[:, body_idx])
@@ -181,8 +183,15 @@ class MotionLibrary:
             self.hand_loaded = torch.as_tensor(np.concatenate(loaded_chunks, 0), device=self.device, dtype=dtype)
             # (N, H, 129) glove taxels pressed per frame, for the hands of ROBOT.grip (in that order).
             self.taxel_pressed = torch.as_tensor(np.concatenate(pressed_chunks, 0), device=self.device, dtype=dtype) if ROBOT.grip else None
+            # (N, H, 129) the glove's force on each taxel (N), the grip reference (supermimic.kinematics.glove).
+            self.taxel_force = None
+            if ROBOT.grip:
+                from supermimic.kinematics.glove import NEWTONS_PER_UNIT
+
+                self.taxel_force = torch.as_tensor(np.concatenate(load_chunks, 0) * NEWTONS_PER_UNIT, device=self.device, dtype=dtype)
         else:
             self.hand_loaded = torch.zeros(self.num_frames, nh, device=self.device, dtype=dtype)
+            self.taxel_pressed = self.taxel_force = None
         if not compact:
             t = lambda arrs: torch.as_tensor(np.concatenate(arrs, 0), dtype=dtype, device=self.device)  # noqa: E731
             self.body_pos_w = t(body_chunks["pos"])

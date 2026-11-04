@@ -41,6 +41,7 @@ class ScheduleCfg:
     updates_per_env_step: float = 0.4  # UTD
     policy_updates_per_wm_update: int = 1
     warmup_iterations: int = 40  # env steps before the first update (fills k-step windows)
+    policy_warmup_iterations: int = 0  # further env steps of world-model-only updates (e.g. a new head after init_from)
     lr_final_ratio: float = 0.03
     lr_decay_fraction: float = 250_000 / 320_000
     log_interval: int = 50  # iterations
@@ -66,3 +67,6 @@ class TrainConfig:
     policy_trainer: PolicyTrainerCfg = field(default_factory=PolicyTrainerCfg)
     schedule: ScheduleCfg = field(default_factory=ScheduleCfg)
     resume: Path | None = None
+    # Start from another run's networks (world model, policy, critic) at iteration 0 with fresh optimisers; world-model
+    # parameters missing from it (e.g. a newly added head) keep their initialisation.
+    init_from: Path | None = None

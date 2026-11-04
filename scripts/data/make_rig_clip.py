@@ -12,7 +12,8 @@ Also written, for the scene with props: the broom and dustpan reference (prop_*_
 (the hands are at human scale), ``hand_loaded`` (all False: the grip reward reads the glove itself) and
 ``taxel_pressed`` (T, 2, 129), the glove taxels pressed at each frame (left, right; sweep_mocap.taxel_pressed),
 cleared on frames where fewer than ``min_pressed`` of a hand's taxels read pressed and in holds shorter than
-``min_hold`` seconds (sensor noise of a free hand).
+``min_hold`` seconds (sensor noise of a free hand), and ``taxel_load`` (T, 2, 129), the graded load above the rest
+baseline (raw glove units, sweep_mocap.taxel_load) on the frames where that hand holds, below ``load_floor`` set to 0.
 """
 
 from __future__ import annotations
@@ -30,11 +31,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.npz",
          out: Path = ROOT / "data/npz/capsule_hands/sweep_task023.npz", fps: float = 50.0, min_pressed: int = 10,
-         min_hold: float = 0.5) -> None:
+         min_hold: float = 0.5, load_floor: float = 3.0) -> None:
     from supermimic.data.motion_convert import ResampledMotion, _so3_derivative, forward_kinematics
     from supermimic.robots import ROBOT
 
-    from supermimic.data.sweep_mocap import taxel_pressed
+    from supermimic.data.sweep_mocap import taxel_load, taxel_pressed
 
     assert ROBOT.name.startswith("capsule_hands"), "run with SM_ROBOT=capsule_hands"
     z = np.load(src)
@@ -95,6 +96,8 @@ def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.np
         for a, b in zip(np.nonzero(edge == 1)[0], np.nonzero(edge == -1)[0]):
             if b - a < min_hold * fps:
                 pressed[a:b, k] = False
+    load = np.stack([taxel_load(z[f"pressure_{s}"], z["pressure_times"], t) for s in ("left", "right")], 1)
+    load = np.where((load > load_floor) & pressed.any(2, keepdims=True), load, 0.0)
 
     f32 = lambda a: np.asarray(a, np.float32)  # noqa: E731
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +110,7 @@ def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.np
         prop_pos_w=f32(np.stack(pos, 1)), prop_quat_w=f32(np.stack(quat, 1)), prop_lin_vel_w=f32(np.stack(lin, 1)), prop_ang_vel_w=f32(np.stack(ang, 1)),
         table_center=f32(z["table_center"]), table_half=f32(z["table_half"]), scene_scale=np.array(1.0),
         hand_loaded=np.zeros((T, len(ROBOT.hand_joint_names)), bool), hand_loaded_joints=np.array(ROBOT.hand_joint_names),
-        taxel_pressed=pressed,
+        taxel_pressed=pressed, taxel_load=f32(load),
     )
     for k, S in enumerate("LR"):
         g = np.nonzero(pressed[:, k].any(1))[0]

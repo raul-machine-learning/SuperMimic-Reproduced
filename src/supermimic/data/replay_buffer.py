@@ -29,6 +29,7 @@ class WindowBatch:
     done: torch.Tensor  # (k, n) termination label of states 1..k
     frame: torch.Tensor  # (k, n) target frame of each transition
     mask: torch.Tensor | None = None  # (k, n) 1 for real transitions, 0 for padding after the terminal row
+    forces: torch.Tensor | None = None  # (k+1, n, F) grip contact forces measured in each state (buffers with force_dim)
 
 
 @dataclass
@@ -42,12 +43,13 @@ class StartBatch:
 
 
 class ReplayBuffer:
-    def __init__(self, num_envs: int, capacity: int, state_dim: int, act_dim: int, xi_dim: int, device):
+    def __init__(self, num_envs: int, capacity: int, state_dim: int, act_dim: int, xi_dim: int, device, force_dim: int = 0):
         self.E, self.T = num_envs, capacity
         self.device = torch.device(device)
         E, T = num_envs, capacity
         f = lambda *shape: torch.zeros(E, T, *shape, device=self.device)  # noqa: E731
         self.s = f(state_dim)
+        self.force = f(force_dim) if force_dim else None
         self.a = f(act_dim)
         self.a_exec = f(act_dim)
         self.xi = f(xi_dim)
@@ -67,11 +69,14 @@ class ReplayBuffer:
     # ------------------------------------------------------------------ writes
 
     @torch.no_grad()
-    def add(self, env_ids, s, a, a_exec, xi, r, done, frame, clip, terminal, ep_start) -> None:
+    def add(self, env_ids, s, a, a_exec, xi, r, done, frame, clip, terminal, ep_start, force=None) -> None:
         p = self.ptr[env_ids]
         # A blown-up simulator state (non-finite) is kept out of every window and start.
         finite = torch.isfinite(s).all(-1) & torch.isfinite(a_exec).all(-1)
         self.s[env_ids, p] = torch.nan_to_num(s, nan=0.0, posinf=0.0, neginf=0.0)
+        if self.force is not None:
+            finite &= torch.isfinite(force).all(-1)
+            self.force[env_ids, p] = torch.nan_to_num(force, nan=0.0, posinf=0.0, neginf=0.0)
         self.a[env_ids, p] = torch.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
         self.a_exec[env_ids, p] = torch.nan_to_num(a_exec, nan=0.0, posinf=0.0, neginf=0.0)
         self.xi[env_ids, p] = xi
@@ -158,6 +163,7 @@ class ReplayBuffer:
             done=self.done[ee[1:], tt[1:]],
             frame=self.frame[ee[:-1], tt[:-1]],
             mask=mask if allow_short else None,
+            forces=None if self.force is None else self.force[ee, tt],
         )
 
     @torch.no_grad()

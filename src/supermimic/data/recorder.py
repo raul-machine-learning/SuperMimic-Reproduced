@@ -19,6 +19,7 @@ import torch
 from mjlab.managers.recorder_manager import RecorderTerm, RecorderTermCfg
 
 from supermimic.data.replay_buffer import ReplayBuffer
+from supermimic.envs.mdp import grip_force
 from supermimic.envs.sim_context import XI_DIM, SimContext
 from supermimic.envs.state_io import STATE_DIM, StateIO
 from supermimic.robots import ROBOT
@@ -36,8 +37,11 @@ class ReplayRecorder(RecorderTerm):
         self.command_name = p.get("command_name", "motion")
         self.action_name = p.get("action_name", "joint_pos")
         n = env.num_envs
-        self.buffer = ReplayBuffer(n, int(p["capacity"]), STATE_DIM, ROBOT.na, XI_DIM, env.device)
+        # Grip robots also log each state's contact forces on the props (labels of the world model's force head).
+        self.force_dim = len(ROBOT.grip) * grip_force.num_bodies()
+        self.buffer = ReplayBuffer(n, int(p["capacity"]), STATE_DIM, ROBOT.na, XI_DIM, env.device, self.force_dim)
         self.prev_s = torch.zeros(n, STATE_DIM, device=env.device)
+        self.prev_force = torch.zeros(n, self.force_dim, device=env.device) if self.force_dim else None
         self.prev_xi = torch.zeros(n, XI_DIM, device=env.device)
         self.prev_frame = torch.zeros(n, dtype=torch.long, device=env.device)
         self.prev_clip = torch.zeros(n, dtype=torch.long, device=env.device)
@@ -53,9 +57,14 @@ class ReplayRecorder(RecorderTerm):
     def action_term(self):
         return self._env.action_manager.get_term(self.action_name)
 
+    def _forces(self) -> torch.Tensor | None:
+        return grip_force.body_forces(self._env).flatten(1) if self.force_dim else None
+
     def _remember(self, ids: torch.Tensor) -> None:
         cmd = self.command
         self.prev_s[ids] = self.state_io.read()[ids]
+        if self.prev_force is not None:
+            self.prev_force[ids] = self._forces()[ids]
         self.prev_xi[ids] = self.ctx.read()[ids]
         self.prev_frame[ids] = cmd.frame[ids]
         self.prev_clip[ids] = cmd.library.frame_clip[cmd.frame[ids]]
@@ -80,6 +89,7 @@ class ReplayRecorder(RecorderTerm):
             clip=self.prev_clip[ids],
             terminal=torch.zeros_like(done_next, dtype=torch.bool),
             ep_start=self.ep_start[ids],
+            force=None if self.prev_force is None else self.prev_force[ids],
         )
         self.ep_start[ids] = False
 
@@ -105,6 +115,7 @@ class ReplayRecorder(RecorderTerm):
             clip=cmd.library.frame_clip[cmd.frame[env_ids]],
             terminal=torch.ones(env_ids.numel(), dtype=torch.bool, device=env.device),
             ep_start=torch.zeros(env_ids.numel(), dtype=torch.bool, device=env.device),
+            force=None if self.prev_force is None else self._forces()[env_ids],
         )
         self.buffer.end_episode(env_ids)
 

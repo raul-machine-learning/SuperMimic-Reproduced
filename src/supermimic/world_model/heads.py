@@ -88,7 +88,7 @@ class ReferenceFrame:
     joint_pos: torch.Tensor | None = None  # (N, NJ); needed by the hand reward only
     prop_pos_w: torch.Tensor | None = None  # (N, P, 3); robots with props
     prop_quat_w: torch.Tensor | None = None  # (N, P, 4)
-    taxel_pressed: torch.Tensor | None = None  # (N, G, 129); robots with a grip
+    taxel_force: torch.Tensor | None = None  # (N, G, 129) glove force per taxel (N); robots with a grip
     grip_hold_early: torch.Tensor | None = None  # (N, G) anticipated holding flags (grip_assist.TrackingRelease)
 
 
@@ -138,15 +138,22 @@ class AnalyticHeads:
             "all_quat": out["quat"],
         }
 
-    def glove_agreement(self, s: torch.Tensor, ref: ReferenceFrame, bodies) -> torch.Tensor:
-        """(N, G) agreement of the hands' touching taxels with the glove (``GloveModel``)."""
+    def grip_distances(self, s: torch.Tensor, bodies) -> torch.Tensor:
+        """(N, G, 129) signed distance of each gripping hand's taxels to its prop (``GloveModel.distances``)."""
         assert self.glove is not None
         prop_pos, prop_quat = ROBOT.split_props(s)[:2]
-        d = self.glove.distances(bodies["all_pos"], bodies["all_quat"], prop_pos, prop_quat)
-        return self.glove.agreement(self.glove.touching(d), ref.taxel_pressed)
+        return self.glove.distances(bodies["all_pos"], bodies["all_quat"], prop_pos, prop_quat)
 
-    def reward(self, s_next: torch.Tensor, action: torch.Tensor, prev_action: torch.Tensor, ref: ReferenceFrame, bodies=None):
-        """Reward r_{t+1} of reaching s_next (= s_{t+1}) under target frame g_t. Returns dict with 'total'."""
+    def grip_agreement(self, d: torch.Tensor, body_force: torch.Tensor, ref: ReferenceFrame) -> torch.Tensor:
+        """(N, G) force agreement with the glove from the taxel distances ``d`` and the force bodies' normal forces
+        (N, G, B): measured by the simulator or predicted by the world model's force head."""
+        assert self.glove is not None
+        return self.glove.force_agreement(self.glove.taxel_forces(d, body_force), ref.taxel_force)
+
+    def reward(self, s_next: torch.Tensor, action: torch.Tensor, prev_action: torch.Tensor, ref: ReferenceFrame, bodies=None,
+               grip: tuple[torch.Tensor, torch.Tensor] | None = None):
+        """Reward r_{t+1} of reaching s_next (= s_{t+1}) under target frame g_t. Returns dict with 'total'.
+        ``grip``: (taxel distances, force-body forces) of s_next, required for robots with a grip."""
         b = bodies if bodies is not None else self.robot_bodies(s_next)
         q = split_state(s_next)[2]
         hand = ref_hand = None
@@ -157,7 +164,8 @@ class AnalyticHeads:
             prop_pos, prop_quat = ROBOT.split_props(s_next)[:2]
             props = dict(prop_pos_w=prop_pos, prop_quat_w=prop_quat, ref_prop_pos_w=ref.prop_pos_w, ref_prop_quat_w=ref.prop_quat_w)
         if self.glove is not None:
-            props["glove_agreement"] = self.glove_agreement(s_next, ref, b)
+            assert grip is not None, "robots with a grip need the contact forces of s_next"
+            props["grip_agreement"] = self.grip_agreement(*grip, ref)
         if self.release is not None:
             props["body_weight"], props["hand_weight"] = self.release.weights(ref.grip_hold_early)
         return tracking_reward_terms(

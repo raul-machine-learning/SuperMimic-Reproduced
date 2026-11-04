@@ -1,6 +1,6 @@
 """One imagined step as a single compiled function (plan 3.6: launch-overhead control).
 
-``ImagStep`` bundles world-model dynamics, analytic FK reward, termination logits and the
+``ImagStep`` bundles world-model dynamics, analytic FK reward (with the force head's grip forces), termination logits and the
 next noise-free observation into one call so ``torch.compile`` can fuse the hundreds of
 small kernels of the per-body FK loop. Reference quantities are passed as plain tensors
 (already gathered from the motion library) so the compiled graph has static shapes.
@@ -24,7 +24,7 @@ REWARD_TERM_NAMES = (
     "action_rate_l2",
     "joint_limit",
 ) + (("motion_hand_joint_pos",) if ROBOT.hand_joint_names else ()) + (("motion_prop_pos", "motion_prop_ori") if ROBOT.props else ()) + (
-    ("grip_glove",) if ROBOT.grip else ()
+    ("grip_force",) if ROBOT.grip else ()
 )
 
 
@@ -40,9 +40,11 @@ class ImagStep:
     def _step(self, s, a, a_prev, xi, a_offset, *ref_fields):
         """``a_offset``: with residual actions, the reference set-point in default-offset action units (else None)."""
         ref = ReferenceFrame(*ref_fields)
-        s_next = self.wm.step(s, a if a_offset is None else a + a_offset, xi)
+        a_set = a if a_offset is None else a + a_offset
+        s_next = self.wm.step(s, a_set, xi)
         bodies = self.wm.heads.robot_bodies(s_next)
-        terms = self.wm.heads.reward(s_next, a, a_prev, ref, bodies)
+        grip = self.wm.grip_forces(s_next, a_set, bodies) if self.wm.force_head is not None else None
+        terms = self.wm.heads.reward(s_next, a, a_prev, ref, bodies, grip=grip)
         r = terms["total"]
         term_vec = torch.stack([terms[k] for k in REWARD_TERM_NAMES], dim=0)  # (len(REWARD_TERM_NAMES), n)
         logits = self.wm.termination_logits(s_next, ref)
