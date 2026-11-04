@@ -4,7 +4,9 @@
 
 Blocks (``supermimic.data.glove_taxels.block_bounds``): every fingertip pad (thumb 4 x 3, fingers 3 x 3) and the palm
 (five rows) is an array with a center and a scale of its spacing; the single taxels (middle and proximal phalanges,
-thumb base) have a center. One set per hand.
+thumb base) have a center. The parameters are anatomical (toward the tip, the finger bases, the index side), so the
+same values place mirror-image layouts on the two hands: with ``mirror`` (default) one set is fitted to both hands,
+the left glove being the mirror of the right; ``--no-mirror`` fits one set per hand.
 
 Data: every frame where a glove holds, with the hands and props written at the rig clip's mocap pose and one physics
 step (as scripts/diag_pressure_blocks.py --mocap-pose-frames): the contact normal force of each hand segment on its
@@ -71,7 +73,7 @@ def shares(x: torch.Tensor, floor: float) -> torch.Tensor:
     return torch.cat([p, 1.0 - p.sum(-1, keepdim=True)], -1)
 
 
-def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, device: str = "cuda:0", write: bool = True) -> None:
+def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool = True, device: str = "cuda:0", write: bool = True) -> None:
     from diag_pressure_blocks import BLOCKS
 
     from supermimic.data.glove_taxels import BLOCK_FIT_FILE, block_bounds, neutral_blocks, taxel_layout_torch
@@ -125,9 +127,10 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, device: str = 
         return ((P - Q) ** 2).sum(-1).mean().item(), torch.minimum(P, Q).sum(-1).mean().item()
 
     sides = [s for s, _ in ROBOT.grip]
-    z = {S: torch.zeros(len(lo), dtype=torch.float64, requires_grad=True) for S in sides}
+    shared = torch.zeros(len(lo), dtype=torch.float64, requires_grad=True)
+    z = {S: shared if mirror else torch.zeros(len(lo), dtype=torch.float64, requires_grad=True) for S in sides}
     before = {S: {"fit": score(h, S, values(z[S].detach()), ~val), "held_out": score(h, S, values(z[S].detach()), val)} for h, S in enumerate(sides)}
-    opt = torch.optim.Adam(list(z.values()), lr=lr)
+    opt = torch.optim.Adam([shared] if mirror else list(z.values()), lr=lr)
     fit_rows = {h: torch.as_tensor(np.nonzero(~val & hold[:, h].cpu().numpy())[0], device=device) for h in range(len(sides))}
     for it in range(steps):
         opt.zero_grad()
@@ -144,7 +147,7 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, device: str = 
 
     fitted = {S: {k: [round(float(x), 6) for x in t] for k, t in unpack(values(z[S].detach())).items()} for S in sides}
     after = {S: {"fit": score(h, S, values(z[S].detach()), ~val), "held_out": score(h, S, values(z[S].detach()), val)} for h, S in enumerate(sides)}
-    print(f"\n{HAND_SHAPE} hands, {len(D['time'])} frames ({int((~val).sum())} fit, {int(val.sum())} held out); "
+    print(f"\n{HAND_SHAPE} hands, {'one mirrored set for both hands' if mirror else 'one set per hand'}, {len(D['time'])} frames ({int((~val).sum())} fit, {int(val.sum())} held out); "
           "share MSE (lower is better) and overlap score (pressure_agreement, higher is better)")
     for h, S in enumerate(sides):
         for part in ("fit", "held_out"):
@@ -154,9 +157,9 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, device: str = 
     print("\nblock parameters: center shifts (mm) along the segment / toward the finger bases, toward the thumb / index side; scale")
     for k in keys:
         cells = []
-        for S in sides:
+        for S in sides[:1] if mirror else sides:
             t = fitted[S][k]
-            cells.append(f"{S} {t[0] * 1000:+5.1f} {t[1] * 1000:+5.1f}" + (f"  x{t[2]:.2f}" if len(t) > 2 else "       "))
+            cells.append(f"{'both' if mirror else S} {t[0] * 1000:+5.1f} {t[1] * 1000:+5.1f}" + (f"  x{t[2]:.2f}" if len(t) > 2 else "       "))
         print(f"  {k:16s} " + "   ".join(cells))
 
     print("\nper block after the fit (all holding frames): glove share, simulated share, overlap")
@@ -172,7 +175,7 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, device: str = 
                   f"{torch.minimum(P0, Q)[:, ix].sum(-1).mean().item():15.3f} {torch.minimum(P1, Q)[:, ix].sum(-1).mean().item():6.3f}")
 
     if write:
-        BLOCK_FIT_FILE.write_text(json.dumps(dict(blocks=fitted, loss="squared error of the pressure shares", before=before, after=after,
+        BLOCK_FIT_FILE.write_text(json.dumps(dict(blocks=fitted, mirror=mirror, loss="squared error of the pressure shares", before=before, after=after,
                                                   frames=int(len(D["time"])), held_out=int(val.sum())), indent=1))
         print(f"\nwrote {BLOCK_FIT_FILE}")
         g = GloveModel(lambda names: torch.tensor([index[n] for n in names], device=device), device)
