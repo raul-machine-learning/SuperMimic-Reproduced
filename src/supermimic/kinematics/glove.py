@@ -27,9 +27,8 @@ import torch
 import torch.nn.functional as F
 
 from supermimic.kinematics.rotations import quat_apply, quat_apply_inverse
-from supermimic.robots import ASSETS, ROBOT
+from supermimic.robots import HANDS_XML, ROBOT
 
-HANDS_XML = ASSETS / "capsule_hands/capsule_hands.xml"
 PROPS_DIR = Path(__file__).resolve().parents[3] / "data/props"
 PROP_SOURCES = {"broom": "cleaningtools_broom", "dustpan": "cleaningtools_dustpan"}
 NEAR = 0.005  # m: taxels nearer the prop than this take most of their body's force
@@ -43,12 +42,12 @@ GLOVE_PRESSURE_FLOOR = 10.0  # raw glove units: same for the glove (a holding gl
 def body_names() -> list[list[str]]:
     """Per hand of ``ROBOT.grip``, the bodies that carry taxels (sorted by body id), padded to the same length by
     repeating the last one (its slot then receives no taxels)."""
-    from supermimic.data.glove_taxels import fitted_adjust, taxel_layout
+    from supermimic.data.glove_taxels import glove_layout
 
     m = mujoco.MjModel.from_xml_path(str(HANDS_XML))
     out = []
     for side, _ in ROBOT.grip:
-        out.append([m.body(b).name for b in sorted(set(int(b) for b in taxel_layout(m, side, fitted_adjust()).body))])
+        out.append([m.body(b).name for b in sorted(set(int(b) for b in glove_layout(m, side).body))])
     nb = max(len(n) for n in out)
     return [n + [n[-1]] * (nb - len(n)) for n in out]
 
@@ -57,14 +56,13 @@ class GloveModel:
     """Taxel placement and held-prop distance fields for the hands of ``ROBOT.grip`` (in that order)."""
 
     def __init__(self, body_indices: Callable[[list[str]], torch.Tensor], device, dtype=torch.float32):
-        from supermimic.data.glove_taxels import fitted_adjust, taxel_layout
+        from supermimic.data.glove_taxels import glove_layout
 
         m = mujoco.MjModel.from_xml_path(str(HANDS_XML))
-        adjust = fitted_adjust()
         body, local, slot, self.sdf, self.lo, self.span, self.prop_index = [], [], [], [], [], [], []
         self.force_body_names = body_names()
         for h, (side, prop) in enumerate(ROBOT.grip):
-            lay = taxel_layout(m, side, adjust)
+            lay = glove_layout(m, side)
             names = [m.body(int(b)).name for b in lay.body]
             body.append(body_indices(names))
             slot.append(torch.tensor([self.force_body_names[h].index(n) for n in names], device=device))

@@ -23,8 +23,9 @@ from PIL import Image, ImageDraw, ImageFont
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
-from supermimic.data.glove_taxels import fitted_adjust, palm_frame, taxel_layout, world_taxels
+from supermimic.data.glove_taxels import glove_layout, palm_frame, world_taxels
 from supermimic.data.sweep_mocap import REGIONS, taxel_load, taxel_pressed
+from supermimic.robots import HAND_DATA
 
 ROOT = Path(__file__).resolve().parents[2]
 SIDES = ("L", "R")
@@ -84,8 +85,8 @@ def _load(name: str, path: Path):
     return mod
 
 
-def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz",
-         grasp_clip: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.npz", touch: float = 0.005,
+def main(out: Path, clip: Path = HAND_DATA / "sweep_task023_hands.npz",
+         grasp_clip: Path = HAND_DATA / "sweep_task023_hands_registered_closed.npz", touch: float = 0.005,
          tile_w: int = 800, tile_h: int = 600) -> None:
     """``clip``: for the hand-alone views; ``grasp_clip``: the grasp-corrected clip for the grasp views."""
     global fgt
@@ -95,7 +96,7 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz",
     c = dict(np.load(clip))
     model, props = rch.build_model(c, Path(str(c["mocap_dir"])), ghosts=False)
     data = mujoco.MjData(model)
-    layout = {S: taxel_layout(model, S, fitted_adjust()) for S in SIDES}
+    layout = {S: glove_layout(model, S) for S in SIDES}
     names = [str(n) for n in c["joint_names"]]
     qadr = np.array([model.jnt_qposadr[model.joint(n).id] for n in names])
     root = {S: model.jnt_qposadr[model.joint(f"{S}_hand_root").id] for S in SIDES}

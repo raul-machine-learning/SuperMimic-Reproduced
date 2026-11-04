@@ -20,14 +20,14 @@ from supermimic.envs import SuperMimicEnvCfgArgs
 from supermimic.envs.mdp import grip_assist
 from supermimic.envs.mdp.motion_library import discover_npz
 from supermimic.envs.tracking_env_cfg import make_env_cfg
-from supermimic.robots import ROBOT
+from supermimic.robots import HANDS_XML, HAND_CLIPS, ROBOT
 
 HANDS_SRC = Path("data/hands/sweep_task023_hands_registered_closed.npz")
 
 
 def glove_body_load(times: np.ndarray) -> tuple[list[list[str]], np.ndarray]:
     """Per gripping hand, the bodies carrying taxels and (T, G, B) the glove load summed over each body's taxels."""
-    from supermimic.data.glove_taxels import fitted_adjust, taxel_layout
+    from supermimic.data.glove_taxels import glove_layout
     from supermimic.data.sweep_mocap import taxel_load
     from supermimic.kinematics.glove import HANDS_XML
 
@@ -35,7 +35,7 @@ def glove_body_load(times: np.ndarray) -> tuple[list[list[str]], np.ndarray]:
     z = np.load(HANDS_SRC)
     names, loads = [], []
     for side, _ in ROBOT.grip:
-        lay = taxel_layout(m, side, fitted_adjust())
+        lay = glove_layout(m, side)
         load = taxel_load(z[f"pressure_{'left' if side == 'L' else 'right'}"], z["pressure_times"], times)
         bodies = sorted(set(int(b) for b in lay.body))
         names.append([m.body(b).name for b in bodies])
@@ -48,7 +48,7 @@ def glove_body_load(times: np.ndarray) -> tuple[list[list[str]], np.ndarray]:
 
 
 @torch.no_grad()
-def main(ckpt: Path | None = None, assist: float = 0.0, clip: str = "sweep_task023", npz_dir: Path = Path("data/npz/capsule_hands"),
+def main(ckpt: Path | None = None, assist: float = 0.0, clip: str = "sweep_task023", npz_dir: Path = HAND_CLIPS,
          num_envs: int = 32, perturb: bool = True, device: str = "cuda:0", out: Path = Path("logs/grip_forces.npz"), seed: int = 1) -> None:
     from mjlab.envs import ManagerBasedRlEnv
     from mjlab.sensor.contact_sensor import ContactMatch, ContactSensorCfg

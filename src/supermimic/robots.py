@@ -12,6 +12,11 @@
 * ``capsule_hands_props``: ``capsule_hands`` with the broom (held by the left hand) and the dustpan (right hand)
   as free props and the table, plus the glove-pattern grip reward.
 
+The two capsule-hand robots come in two segment shapes, chosen by ``SM_HAND_SHAPE``: ``capsule`` (default) or
+``box`` (every capsule replaced by a box of the same span with a square cross-section, flat on the palm side). Each
+shape has its own assets (``assets/<shape>_hands``), hand clips (``data/hands`` / ``data/hands_box``), rig clips
+(``data/npz/<shape>_hands``) and grasp offsets.
+
 The state, observation and goal layouts are sized by the number of hinge joints (``nj``) and of props, the
 action by the number of actuated joints (``na``). The active robot is fixed per process by the ``SM_ROBOT``
 environment variable, since those sizes are module-level constants throughout the package.
@@ -371,7 +376,14 @@ def _inspire_sweep_entity_cfg() -> EntityCfg:
 
 # ----------------------------------------------------------------------------- capsule hands
 
-CAPSULE_RIG_XML = ASSETS / "capsule_hands/capsule_rig.xml"
+HAND_SHAPE = os.environ.get("SM_HAND_SHAPE", "capsule")
+assert HAND_SHAPE in ("capsule", "box"), f"SM_HAND_SHAPE must be capsule or box, not {HAND_SHAPE!r}"
+HAND_ASSETS = ASSETS / f"{HAND_SHAPE}_hands"
+HANDS_XML = HAND_ASSETS / f"{HAND_SHAPE}_hands.xml"
+CAPSULE_RIG_XML = HAND_ASSETS / f"{HAND_SHAPE}_rig.xml"
+_REPO = Path(__file__).resolve().parents[2]
+HAND_DATA = _REPO / ("data/hands" if HAND_SHAPE == "capsule" else f"data/hands_{HAND_SHAPE}")
+HAND_CLIPS = _REPO / f"data/npz/{HAND_SHAPE}_hands"
 
 
 def _xml_joint_names(path: Path) -> tuple[str, ...]:
@@ -556,8 +568,11 @@ ROBOTS["capsule_hands_props"] = replace(
     # From scripts/diag_grasp_search.py: replayed on the reference without perturbations, these carry the broom (2.3 cm
     # mean error, 7 cm lift) and the dustpan (about 1.5 cm, 23 cm lift); the dustpan grasp was refined under the
     # training perturbations (--robust). The broom grip needs the thumb opposed and the fingers adducted.
+    # Box hands: 1.2 cm / 6 cm lift on the broom, 0.8 cm / 25 cm on the dustpan.
     grip_assist=_grasp_offsets("L", 0.83, 0.47, 0.46, -0.51, 0.28, 0.44, 0.38, 0.05, 0.64)
-    + _grasp_offsets("R", 0.69, 0.15, 0.67, -0.28, 0.30, -0.37, 0.72, 0.41, 0.67),
+    + _grasp_offsets("R", 0.69, 0.15, 0.67, -0.28, 0.30, -0.37, 0.72, 0.41, 0.67) if HAND_SHAPE == "capsule" else
+    _grasp_offsets("L", 0.29, 0.17, 0.93, 0.46, 0.09, -0.02, 0.49, 0.23, 0.16)
+    + _grasp_offsets("R", 0.27, 0.33, 0.20, -0.07, -0.05, -0.26, 0.04, 0.00, 0.98),
 )
 
 

@@ -29,9 +29,9 @@ import tyro
 from scipy.spatial.transform import Rotation, Slerp
 
 from supermimic.data.sweep_mocap import REGIONS, TABLE_TOP_HEIGHT, region_loaded
+from supermimic.robots import HAND_DATA, HANDS_XML
 
 ROOT = Path(__file__).resolve().parents[2]
-HANDS_XML = ROOT / "src/supermimic/assets/capsule_hands/capsule_hands.xml"
 SIDES = ("L", "R")
 SIDE_NAME = {"L": "left", "R": "right"}
 HELD_CANDIDATES = ("cleaningtools_broom", "cleaningtools_dustpan")
@@ -404,7 +404,7 @@ def print_metrics(tag: str, met: dict) -> None:
             print(f"    {SIDE_NAME[S]:5s} {reg:24s} loaded {frac:4.0%}   touching {hit:4.0%}")
 
 
-def main(clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", out_dir: Path = Path("/tmp/capsule_check"),
+def main(clip: Path = HAND_DATA / "sweep_task023_hands.npz", out_dir: Path = Path("/tmp/capsule_check"),
          props_dir: Path = ROOT / "data/props", squeeze: tuple[float, ...] = (0.0, 0.3, 0.6), ignore: tuple[str, ...] = ("pinky",),
          skip_audit: bool = False, skip_air: bool = False, dt: float = 0.002, wrist_hz: float = 6.0, wrist_force: float = 40.0,
          wrist_torque: float = 4.0, broom_mass: float = 0.10, dustpan_mass: float = 0.20, hand_friction: float = 1.0,

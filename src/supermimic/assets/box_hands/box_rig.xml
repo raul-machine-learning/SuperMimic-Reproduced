@@ -1,0 +1,832 @@
+<mujoco model="box_rig">
+  <compiler angle="radian"/>
+
+  <worldbody>
+    <body name="rig" gravcomp="1">
+      <joint name="rig_root" type="free"/>
+      <body name="L_wrist_x" pos="0.245122 -0.811667 1.01142" gravcomp="1">
+        <joint name="L_wrist_x" type="slide" range="-0.231705 0.347055" armature="0.05" axis="1 0 0" limited="true"/>
+        <body name="L_wrist_y" gravcomp="1">
+          <joint name="L_wrist_y" type="slide" range="-0.197958 0.292947" armature="0.05" axis="0 1 0" limited="true"/>
+          <body name="L_wrist_z" gravcomp="1">
+            <joint name="L_wrist_z" type="slide" range="-0.32379 0.246555" armature="0.05" limited="true"/>
+            <body name="L_wrist_ry" quat="-0.499343 -0.321358 0.344185 0.727271" gravcomp="1">
+              <joint name="L_wrist_ry" range="-0.840801 1.53876" armature="0.002" axis="0 1 0" limited="true"/>
+              <body name="L_wrist_rx" gravcomp="1">
+                <joint name="L_wrist_rx" range="-0.873392 0.759858" armature="0.002" axis="1 0 0" limited="true"/>
+                <body name="L_hand" gravcomp="1">
+                  <joint name="L_wrist_rz" range="-1.6498 0.872048" armature="0.002" limited="true"/>
+                  <geom name="L_heel_collision" size="0.012 0.012 0.0359259" pos="0.014996 0.0014161 0.000360812" quat="-0.00102029 0.740143 -0.670326 -0.0533875" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                  <geom name="L_thenar_collision" size="0.013 0.013 0.0333892" pos="0.0338704 -0.00599068 0.0338532" quat="-0.595106 0.23842 -0.453002 0.619511" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                  <geom name="L_index_wrist_collision" size="0.012 0.012 0.0314882" pos="0.0362887 0.000814493 0.0232722" quat="0.521073 -0.506043 0.516186 -0.453824" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                  <geom name="L_middle_wrist_collision" size="0.012 0.012 0.0325335" pos="0.035584 0.00326573 0.00202276" quat="-0.509444 0.536917 -0.523598 0.421938" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                  <geom name="L_ring_wrist_collision" size="0.012 0.012 0.03111" pos="0.0328846 0.00399487 -0.0131963" quat="-0.487482 0.551358 -0.540738 0.407393" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                  <geom name="L_pinky_wrist_collision" size="0.012 0.012 0.0289055" pos="0.029322 0.0043121 -0.0281778" quat="-0.452802 0.566051 -0.565729 0.393074" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                  <site name="L_wrist" size="0.004"/>
+                  <body name="L_index0" pos="0.037623 0.00177963 0.00614955" quat="0.999975 0 -0.00713537 0" gravcomp="1">
+                    <geom name="L_index0_collision" size="0.011 0.011 0.0402324" pos="0.0474606 0.00190237 0.0142518" quat="0.517377 -0.509268 0.519891 -0.450201" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                    <body name="L_index1" pos="0.0765907 0.00362287 0.0125189" gravcomp="1">
+                      <joint name="L_index1_flex" range="0.0192292 1.6" armature="0.002" axis="-0.141846 0.535315 -0.832657"/>
+                      <joint name="L_index1_spread" range="-0.42814 0.34674" armature="0.002" axis="-0.14525 0.820802 0.552437"/>
+                      <geom name="L_index1_collision" size="0.009 0.009 0.0265" pos="0.0175 0 0" quat="0.520125 -0.47903 0.520125 -0.47903" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                      <body name="L_index2" pos="0.035 0 0" gravcomp="1">
+                        <joint name="L_index2_flex" range="-0.324533 1.9" armature="0.002" axis="0 0 -1"/>
+                        <geom name="L_index2_collision" size="0.0082 0.0082 0.0250674" pos="0.0168674 0 0" quat="0.520125 -0.47903 0.520125 -0.47903" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                        <body name="L_index3" pos="0.0337349 0 0" gravcomp="1">
+                          <joint name="L_index3_flex" range="-0.324533 1.3" armature="0.002" axis="0 0 -1"/>
+                          <geom name="L_index3_collision" size="0.0074 0.0074 0.0137" pos="0.0063 0 0" quat="0.520125 -0.47903 0.520125 -0.47903" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                          <site name="L_index_tip" size="0.004" pos="0.02 0 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                  <body name="L_middle0" pos="0.0348021 0.00355049 -0.0020339" quat="0.999963 0 0.00862686 0" gravcomp="1">
+                    <geom name="L_middle0_collision" size="0.011 0.011 0.0418003" pos="0.0514598 0.00511587 -0.00146572" quat="-0.513942 0.533257 -0.519184 0.426555" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                    <body name="L_middle1" pos="0.0819085 0.00835625 -0.00478689" gravcomp="1">
+                      <joint name="L_middle1_flex" range="0.0761894 1.6" armature="0.002" axis="-0.165721 0.376298 -0.911557"/>
+                      <joint name="L_middle1_spread" range="-0.329986 0.430807" armature="0.002" axis="-0.139186 0.906161 0.399374"/>
+                      <geom name="L_middle1_collision" size="0.0093 0.0093 0.0268" pos="0.0175 0 0" quat="0.519401 -0.479816 0.519401 -0.479816" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                      <body name="L_middle2" pos="0.035 0 0" gravcomp="1">
+                        <joint name="L_middle2_flex" range="-0.324533 1.9" armature="0.002" axis="0 0 -1"/>
+                        <geom name="L_middle2_collision" size="0.0085 0.0085 0.0241231" pos="0.0156231 0 0" quat="0.519401 -0.479816 0.519401 -0.479816" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                        <body name="L_middle3" pos="0.0312462 0 0" gravcomp="1">
+                          <joint name="L_middle3_flex" range="-0.24026 1.3" armature="0.002" axis="0 0 -1"/>
+                          <geom name="L_middle3_collision" size="0.0076 0.0076 0.0138" pos="0.0062 0 0" quat="0.519401 -0.479816 0.519401 -0.479816" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                          <site name="L_middle_tip" size="0.004" pos="0.02 0 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                  <body name="L_ring0" pos="0.0329063 0.00348427 -0.00828495" quat="0.999985 0 0.00541213 0" gravcomp="1">
+                    <geom name="L_ring0_collision" size="0.0105 0.0105 0.039165" pos="0.0467777 0.00514327 -0.0136162" quat="-0.490401 0.549145 -0.538092 0.410371" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                    <body name="L_ring1" pos="0.0748255 0.00792287 -0.0188391" gravcomp="1">
+                      <joint name="L_ring1_flex" range="-0.00112584 1.6" armature="0.002" axis="-0.180756 0.443933 -0.877639"/>
+                      <joint name="L_ring1_spread" range="-0.306714 0.566471" armature="0.002" axis="0.0792168 0.89601 0.43691"/>
+                      <geom name="L_ring1_collision" size="0.0088 0.0088 0.0263" pos="0.0175 0 0" quat="0.51955 -0.479654 0.51955 -0.479654" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                      <body name="L_ring2" pos="0.035 0 0" gravcomp="1">
+                        <joint name="L_ring2_flex" range="-0.324533 1.9" armature="0.002" axis="0 0 -1"/>
+                        <geom name="L_ring2_collision" size="0.008 0.008 0.023454" pos="0.015454 0 0" quat="0.51955 -0.479654 0.51955 -0.479654" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                        <body name="L_ring3" pos="0.030908 0 0" gravcomp="1">
+                          <joint name="L_ring3_flex" range="-0.324533 1.3" armature="0.002" axis="0 0 -1"/>
+                          <geom name="L_ring3_collision" size="0.0072 0.0072 0.0136" pos="0.0064 0 0" quat="0.51955 -0.479654 0.51955 -0.479654" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                          <site name="L_ring_tip" size="0.004" pos="0.02 0 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                  <body name="L_pinky0" pos="0.030587 0.00287802 -0.0148969" quat="0.999963 0 0.00861681 0" gravcomp="1">
+                    <geom name="L_pinky0_collision" size="0.0095 0.0095 0.0348583" pos="0.039623 0.00430257 -0.0244747" quat="-0.45766 0.562643 -0.561806 0.397937" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                    <body name="L_pinky1" pos="0.0640183 0.00602367 -0.0311791" gravcomp="1">
+                      <joint name="L_pinky1_flex" range="-0.121765 1.62244" armature="0.002" axis="-0.226937 0.478781 -0.848097"/>
+                      <joint name="L_pinky1_spread" range="-0.344015 0.584343" armature="0.002" axis="0.12727 0.877929 0.461567"/>
+                      <geom name="L_pinky1_collision" size="0.0078 0.0078 0.0203" pos="0.0125 0 0" quat="0.519401 -0.479815 0.519401 -0.479815" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                      <body name="L_pinky2" pos="0.025 0 0" gravcomp="1">
+                        <joint name="L_pinky2_flex" range="-0.324533 1.9" armature="0.002" axis="0 0 -1"/>
+                        <geom name="L_pinky2_collision" size="0.0071 0.0071 0.0178758" pos="0.0107758 0 0" quat="0.519401 -0.479815 0.519401 -0.479815" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                        <body name="L_pinky3" pos="0.0215516 0 0" gravcomp="1">
+                          <joint name="L_pinky3_flex" range="-0.324533 1.3" armature="0.002" axis="0 0 -1"/>
+                          <geom name="L_pinky3_collision" size="0.0065 0.0065 0.01325" pos="0.00675 0 0" quat="0.519401 -0.479815 0.519401 -0.479815" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                          <site name="L_pinky_tip" size="0.004" pos="0.02 0 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                  <body name="L_thumb1" pos="0.0508867 -0.0116489 0.0435563" gravcomp="1">
+                    <joint name="L_thumb1_flex" range="-0.0271948 1.08068" armature="0.002" axis="-0.0705967 0.34279 -0.936756"/>
+                    <joint name="L_thumb1_spread" range="-0.455461 0.25684" armature="0.002" axis="-0.131504 0.927704 0.349389"/>
+                    <geom name="L_thumb1_collision" size="0.012 0.012 0.0295" pos="0.0175 0 0" quat="0.579579 -0.405078 0.579579 -0.405078" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                    <body name="L_thumb2" pos="0.035 0 0" gravcomp="1">
+                      <joint name="L_thumb2_flex" range="-0.310175 1.42179" armature="0.002" axis="0.961024 0.116728 -0.250616"/>
+                      <joint name="L_thumb2_spread" range="-0.523126 0.329949" armature="0.002" axis="-0.276131 0.36059 -0.890913"/>
+                      <geom name="L_thumb2_collision" size="0.0105 0.0105 0.0274574" pos="0.0169574 0 0" quat="0.5198 -0.479383 0.5198 -0.479383" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                      <body name="L_thumb3" pos="0.0339149 0 0" gravcomp="1">
+                        <joint name="L_thumb3_flex" range="-0.279879 1.3" armature="0.002" axis="0 0 -1"/>
+                        <geom name="L_thumb3_collision" size="0.0095 0.0095 0.01475" pos="0.00525 0 0" quat="0.5 -0.5 0.5 -0.5" type="box" condim="4" rgba="0.87 0.72 0.62 1"/>
+                        <site name="L_thumb_tip" size="0.004" pos="0.02 0 0"/>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="R_wrist_x" pos="-0.190711 -0.772576 1.03214" gravcomp="1">
+        <joint name="R_wrist_x" type="slide" range="-0.268282 0.222049" armature="0.05" axis="1 0 0" limited="true"/>
+        <body name="R_wrist_y" gravcomp="1">
+          <joint name="R_wrist_y" type="slide" range="-0.423597 0.414064" armature="0.05" axis="0 1 0" limited="true"/>
+          <body name="R_wrist_z" gravcomp="1">
+            <joint name="R_wrist_z" type="slide" range="-0.342979 0.324951" armature="0.05" limited="true"/>
+            <body name="R_wrist_ry" quat="-0.698125 -0.395536 -0.307554 -0.511452" gravcomp="1">
+              <joint name="R_wrist_ry" range="-1.82047 1.48438" armature="0.002" axis="0 1 0" limited="true"/>
+              <body name="R_wrist_rx" gravcomp="1">
+                <joint name="R_wrist_rx" range="-0.936411 1.44637" armature="0.002" axis="1 0 0" limited="true"/>
+                <body name="R_hand" gravcomp="1">
+                  <joint name="R_wrist_rz" range="-0.959875 1.51904" armature="0.002" limited="true"/>
+                  <geom name="R_heel_collision" size="0.012 0.012 0.0368049" pos="-0.014976 0.00095346 0.000672472" quat="0.045686 -0.680988 0.72993 0.0370327" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                  <geom name="R_thenar_collision" size="0.013 0.013 0.0344109" pos="-0.033458 -0.00828443 0.0348567" quat="0.613157 0.469819 -0.237136 -0.589131" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                  <geom name="R_index_wrist_collision" size="0.012 0.012 0.0307288" pos="-0.0341058 -0.00171913 0.0251071" quat="0.464435 0.52849 -0.475399 -0.5282" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                  <geom name="R_middle_wrist_collision" size="0.012 0.012 0.0313587" pos="-0.0343136 0.00170547 0.00559357" quat="0.42926 0.530629 -0.51032 -0.523203" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                  <geom name="R_ring_wrist_collision" size="0.012 0.012 0.0293954" pos="-0.0318889 0.00352482 -0.0120691" quat="0.406479 0.550857 -0.532182 -0.498109" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                  <geom name="R_pinky_wrist_collision" size="0.012 0.012 0.0294823" pos="-0.0314803 0.00442189 -0.0283682" quat="0.401178 0.578891 -0.539384 -0.461527" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                  <site name="R_wrist" size="0.004"/>
+                  <body name="R_index0" pos="-0.0373225 -0.000297819 0.00796331" quat="0.999975 0 0.00700203 0" gravcomp="1">
+                    <geom name="R_index0_collision" size="0.011 0.011 0.0390932" pos="-0.0438284 -0.000891632 0.0160348" quat="0.461095 0.532175 -0.478639 -0.524486" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                    <body name="R_index1" pos="-0.0719113 -0.000573824 0.0153433" gravcomp="1">
+                      <joint name="R_index1_flex" range="0.0233886 1.6" armature="0.002" axis="-0.129278 -0.556246 0.820901"/>
+                      <joint name="R_index1_spread" range="-0.323293 0.273923" armature="0.002" axis="-0.103777 0.830891 0.546672"/>
+                      <geom name="R_index1_collision" size="0.009 0.009 0.0265" pos="-0.0175 0 0" quat="0.469483 0.528758 -0.469483 -0.528758" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                      <body name="R_index2" pos="-0.035 0 0" gravcomp="1">
+                        <joint name="R_index2_flex" range="-0.324533 1.9" armature="0.002"/>
+                        <geom name="R_index2_collision" size="0.0082 0.0082 0.0247766" pos="-0.0165766 0 0" quat="0.469483 0.528758 -0.469483 -0.528758" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                        <body name="R_index3" pos="-0.0331533 0 0" gravcomp="1">
+                          <joint name="R_index3_flex" range="-0.0120376 1.57668" armature="0.002"/>
+                          <geom name="R_index3_collision" size="0.0074 0.0074 0.0137" pos="-0.0063 0 0" quat="0.469483 0.528758 -0.469483 -0.528758" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                          <site name="R_index_tip" size="0.004" pos="-0.02 0 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                  <body name="R_middle0" pos="-0.0349494 0.00244476 -0.00070202" quat="0.999962 0 0.00867875 0" gravcomp="1">
+                    <geom name="R_middle0_collision" size="0.011 0.011 0.0400381" pos="-0.0474718 0.0030573 0.00140711" quat="0.424815 0.53515 -0.514027 -0.518578" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                    <body name="R_middle1" pos="-0.0762708 0.00533525 -0.00153203" gravcomp="1">
+                      <joint name="R_middle1_flex" range="0.0425888 1.6" armature="0.002" axis="-0.0946481 -0.31789 0.943391"/>
+                      <joint name="R_middle1_spread" range="-0.451835 0.274316" armature="0.002" axis="0.0214404 0.946775 0.321182"/>
+                      <geom name="R_middle1_collision" size="0.0093 0.0093 0.0268" pos="-0.0175 0 0" quat="-0.469425 -0.528811 0.469425 0.528811" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                      <body name="R_middle2" pos="-0.035 0 0" gravcomp="1">
+                        <joint name="R_middle2_flex" range="-0.324533 1.9" armature="0.002"/>
+                        <geom name="R_middle2_collision" size="0.0085 0.0085 0.0236447" pos="-0.0151447 0 0" quat="-0.469425 -0.528811 0.469425 0.528811" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                        <body name="R_middle3" pos="-0.0302893 0 0" gravcomp="1">
+                          <joint name="R_middle3_flex" range="-0.084642 1.45382" armature="0.002"/>
+                          <geom name="R_middle3_collision" size="0.0076 0.0076 0.0138" pos="-0.0062 0 0" quat="-0.469425 -0.528811 0.469425 0.528811" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                          <site name="R_middle_tip" size="0.004" pos="-0.02 0 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                  <body name="R_ring0" pos="-0.0331211 0.00305128 -0.00756887" quat="0.999962 0 -0.00872654 0" gravcomp="1">
+                    <geom name="R_ring0_collision" size="0.0105 0.0105 0.0365931" pos="-0.0416519 0.00405461 -0.0113126" quat="0.411108 0.54649 -0.528615 -0.502897" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                    <body name="R_ring1" pos="-0.0673351 0.00620325 -0.0153875" gravcomp="1">
+                      <joint name="R_ring1_flex" range="-0.103717 1.6" armature="0.002" axis="-0.0661004 -0.296202 0.952835"/>
+                      <joint name="R_ring1_spread" range="-0.538752 0.27567" armature="0.002" axis="0.0112946 0.954641 0.297546"/>
+                      <geom name="R_ring1_collision" size="0.0088 0.0088 0.0263" pos="-0.0175 0 0" quat="-0.47005 -0.528254 0.47005 0.528254" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                      <body name="R_ring2" pos="-0.035 0 0" gravcomp="1">
+                        <joint name="R_ring2_flex" range="-0.0515694 1.9" armature="0.002"/>
+                        <geom name="R_ring2_collision" size="0.008 0.008 0.0263508" pos="-0.0183508 0 0" quat="0.47005 0.528254 -0.47005 -0.528254" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                        <body name="R_ring3" pos="-0.0367017 0 0" gravcomp="1">
+                          <joint name="R_ring3_flex" range="-0.273236 1.3" armature="0.002" axis="0 0 1"/>
+                          <geom name="R_ring3_collision" size="0.0072 0.0072 0.0136" pos="-0.0064 0 0" quat="0.47005 0.528254 -0.47005 -0.528254" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                          <site name="R_ring_tip" size="0.004" pos="-0.02 0 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                  <body name="R_pinky0" pos="-0.0310815 0.00210759 -0.0139737" quat="0.999962 0 -0.00872654 0" gravcomp="1">
+                    <geom name="R_pinky0_collision" size="0.0095 0.0095 0.0357235" pos="-0.0431049 0.00377422 -0.0246641" quat="0.40587 0.574841 -0.535862 -0.466561" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                    <body name="R_pinky1" pos="-0.0685778 0.00465017 -0.0308314" gravcomp="1">
+                      <joint name="R_pinky1_flex" range="0.232739 1.6" armature="0.002" axis="-0.130394 -0.862166 0.489557"/>
+                      <joint name="R_pinky1_spread" range="-0.433584 0.607047" armature="0.002" axis="0.223847 -0.506624 -0.832601"/>
+                      <geom name="R_pinky1_collision" size="0.0078 0.0078 0.0203" pos="-0.0125 0 0" quat="0.47005 0.528254 -0.47005 -0.528254" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                      <body name="R_pinky2" pos="-0.025 0 0" gravcomp="1">
+                        <joint name="R_pinky2_flex" range="-0.324533 1.9" armature="0.002"/>
+                        <geom name="R_pinky2_collision" size="0.0071 0.0071 0.0138586" pos="-0.00675855 0 0" quat="0.47005 0.528254 -0.47005 -0.528254" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                        <body name="R_pinky3" pos="-0.0135171 0 0" gravcomp="1">
+                          <joint name="R_pinky3_flex" range="-0.324533 1.3" armature="0.002"/>
+                          <geom name="R_pinky3_collision" size="0.0065 0.0065 0.01325" pos="-0.00675 0 0" quat="0.47005 0.528254 -0.47005 -0.528254" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                          <site name="R_pinky_tip" size="0.004" pos="-0.02 0 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                  <body name="R_thumb1" pos="-0.0515369 -0.0146378 0.0444075" gravcomp="1">
+                    <joint name="R_thumb1_flex" range="0.143788 1.15875" armature="0.002" axis="-0.0714556 -0.240408 0.968038"/>
+                    <joint name="R_thumb1_spread" range="-0.249998 0.376593" armature="0.002" axis="0.285447 0.925 0.25079"/>
+                    <geom name="R_thumb1_collision" size="0.012 0.012 0.0295" pos="-0.0175 0 0" quat="-0.435596 -0.557006 0.435596 0.557006" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                    <body name="R_thumb2" pos="-0.035 0 0" gravcomp="1">
+                      <joint name="R_thumb2_flex" range="-0.124258 1.38855" armature="0.002" axis="-0.984858 -0.0721837 -0.15762"/>
+                      <joint name="R_thumb2_spread" range="-0.31431 0.311122" armature="0.002" axis="-0.168423 0.182915 0.968595"/>
+                      <geom name="R_thumb2_collision" size="0.0105 0.0105 0.0246962" pos="-0.0141962 0 0" quat="-0.469732 -0.528537 0.469732 0.528537" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                      <body name="R_thumb3" pos="-0.0283925 0 0" gravcomp="1">
+                        <joint name="R_thumb3_flex" range="-0.22648 1.3" armature="0.002" axis="0 0 -1"/>
+                        <geom name="R_thumb3_collision" size="0.0095 0.0095 0.01475" pos="-0.00525 0 0" quat="-0.5 0.5 0.5 -0.5" type="box" condim="4" rgba="0.8 0.66 0.58 1"/>
+                        <site name="R_thumb_tip" size="0.004" pos="-0.02 0 0"/>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="L_wrist_x" body2="L_wrist_y"/>
+    <exclude body1="L_wrist_x" body2="L_wrist_z"/>
+    <exclude body1="L_wrist_x" body2="L_wrist_ry"/>
+    <exclude body1="L_wrist_x" body2="L_wrist_rx"/>
+    <exclude body1="L_wrist_x" body2="L_hand"/>
+    <exclude body1="L_wrist_x" body2="L_index0"/>
+    <exclude body1="L_wrist_x" body2="L_index1"/>
+    <exclude body1="L_wrist_x" body2="L_index2"/>
+    <exclude body1="L_wrist_x" body2="L_index3"/>
+    <exclude body1="L_wrist_x" body2="L_middle0"/>
+    <exclude body1="L_wrist_x" body2="L_middle1"/>
+    <exclude body1="L_wrist_x" body2="L_middle2"/>
+    <exclude body1="L_wrist_x" body2="L_middle3"/>
+    <exclude body1="L_wrist_x" body2="L_ring0"/>
+    <exclude body1="L_wrist_x" body2="L_ring1"/>
+    <exclude body1="L_wrist_x" body2="L_ring2"/>
+    <exclude body1="L_wrist_x" body2="L_ring3"/>
+    <exclude body1="L_wrist_x" body2="L_pinky0"/>
+    <exclude body1="L_wrist_x" body2="L_pinky1"/>
+    <exclude body1="L_wrist_x" body2="L_pinky2"/>
+    <exclude body1="L_wrist_x" body2="L_pinky3"/>
+    <exclude body1="L_wrist_x" body2="L_thumb1"/>
+    <exclude body1="L_wrist_x" body2="L_thumb2"/>
+    <exclude body1="L_wrist_x" body2="L_thumb3"/>
+    <exclude body1="L_wrist_y" body2="L_wrist_z"/>
+    <exclude body1="L_wrist_y" body2="L_wrist_ry"/>
+    <exclude body1="L_wrist_y" body2="L_wrist_rx"/>
+    <exclude body1="L_wrist_y" body2="L_hand"/>
+    <exclude body1="L_wrist_y" body2="L_index0"/>
+    <exclude body1="L_wrist_y" body2="L_index1"/>
+    <exclude body1="L_wrist_y" body2="L_index2"/>
+    <exclude body1="L_wrist_y" body2="L_index3"/>
+    <exclude body1="L_wrist_y" body2="L_middle0"/>
+    <exclude body1="L_wrist_y" body2="L_middle1"/>
+    <exclude body1="L_wrist_y" body2="L_middle2"/>
+    <exclude body1="L_wrist_y" body2="L_middle3"/>
+    <exclude body1="L_wrist_y" body2="L_ring0"/>
+    <exclude body1="L_wrist_y" body2="L_ring1"/>
+    <exclude body1="L_wrist_y" body2="L_ring2"/>
+    <exclude body1="L_wrist_y" body2="L_ring3"/>
+    <exclude body1="L_wrist_y" body2="L_pinky0"/>
+    <exclude body1="L_wrist_y" body2="L_pinky1"/>
+    <exclude body1="L_wrist_y" body2="L_pinky2"/>
+    <exclude body1="L_wrist_y" body2="L_pinky3"/>
+    <exclude body1="L_wrist_y" body2="L_thumb1"/>
+    <exclude body1="L_wrist_y" body2="L_thumb2"/>
+    <exclude body1="L_wrist_y" body2="L_thumb3"/>
+    <exclude body1="L_wrist_z" body2="L_wrist_ry"/>
+    <exclude body1="L_wrist_z" body2="L_wrist_rx"/>
+    <exclude body1="L_wrist_z" body2="L_hand"/>
+    <exclude body1="L_wrist_z" body2="L_index0"/>
+    <exclude body1="L_wrist_z" body2="L_index1"/>
+    <exclude body1="L_wrist_z" body2="L_index2"/>
+    <exclude body1="L_wrist_z" body2="L_index3"/>
+    <exclude body1="L_wrist_z" body2="L_middle0"/>
+    <exclude body1="L_wrist_z" body2="L_middle1"/>
+    <exclude body1="L_wrist_z" body2="L_middle2"/>
+    <exclude body1="L_wrist_z" body2="L_middle3"/>
+    <exclude body1="L_wrist_z" body2="L_ring0"/>
+    <exclude body1="L_wrist_z" body2="L_ring1"/>
+    <exclude body1="L_wrist_z" body2="L_ring2"/>
+    <exclude body1="L_wrist_z" body2="L_ring3"/>
+    <exclude body1="L_wrist_z" body2="L_pinky0"/>
+    <exclude body1="L_wrist_z" body2="L_pinky1"/>
+    <exclude body1="L_wrist_z" body2="L_pinky2"/>
+    <exclude body1="L_wrist_z" body2="L_pinky3"/>
+    <exclude body1="L_wrist_z" body2="L_thumb1"/>
+    <exclude body1="L_wrist_z" body2="L_thumb2"/>
+    <exclude body1="L_wrist_z" body2="L_thumb3"/>
+    <exclude body1="L_wrist_ry" body2="L_wrist_rx"/>
+    <exclude body1="L_wrist_ry" body2="L_hand"/>
+    <exclude body1="L_wrist_ry" body2="L_index0"/>
+    <exclude body1="L_wrist_ry" body2="L_index1"/>
+    <exclude body1="L_wrist_ry" body2="L_index2"/>
+    <exclude body1="L_wrist_ry" body2="L_index3"/>
+    <exclude body1="L_wrist_ry" body2="L_middle0"/>
+    <exclude body1="L_wrist_ry" body2="L_middle1"/>
+    <exclude body1="L_wrist_ry" body2="L_middle2"/>
+    <exclude body1="L_wrist_ry" body2="L_middle3"/>
+    <exclude body1="L_wrist_ry" body2="L_ring0"/>
+    <exclude body1="L_wrist_ry" body2="L_ring1"/>
+    <exclude body1="L_wrist_ry" body2="L_ring2"/>
+    <exclude body1="L_wrist_ry" body2="L_ring3"/>
+    <exclude body1="L_wrist_ry" body2="L_pinky0"/>
+    <exclude body1="L_wrist_ry" body2="L_pinky1"/>
+    <exclude body1="L_wrist_ry" body2="L_pinky2"/>
+    <exclude body1="L_wrist_ry" body2="L_pinky3"/>
+    <exclude body1="L_wrist_ry" body2="L_thumb1"/>
+    <exclude body1="L_wrist_ry" body2="L_thumb2"/>
+    <exclude body1="L_wrist_ry" body2="L_thumb3"/>
+    <exclude body1="L_wrist_rx" body2="L_hand"/>
+    <exclude body1="L_wrist_rx" body2="L_index0"/>
+    <exclude body1="L_wrist_rx" body2="L_index1"/>
+    <exclude body1="L_wrist_rx" body2="L_index2"/>
+    <exclude body1="L_wrist_rx" body2="L_index3"/>
+    <exclude body1="L_wrist_rx" body2="L_middle0"/>
+    <exclude body1="L_wrist_rx" body2="L_middle1"/>
+    <exclude body1="L_wrist_rx" body2="L_middle2"/>
+    <exclude body1="L_wrist_rx" body2="L_middle3"/>
+    <exclude body1="L_wrist_rx" body2="L_ring0"/>
+    <exclude body1="L_wrist_rx" body2="L_ring1"/>
+    <exclude body1="L_wrist_rx" body2="L_ring2"/>
+    <exclude body1="L_wrist_rx" body2="L_ring3"/>
+    <exclude body1="L_wrist_rx" body2="L_pinky0"/>
+    <exclude body1="L_wrist_rx" body2="L_pinky1"/>
+    <exclude body1="L_wrist_rx" body2="L_pinky2"/>
+    <exclude body1="L_wrist_rx" body2="L_pinky3"/>
+    <exclude body1="L_wrist_rx" body2="L_thumb1"/>
+    <exclude body1="L_wrist_rx" body2="L_thumb2"/>
+    <exclude body1="L_wrist_rx" body2="L_thumb3"/>
+    <exclude body1="L_hand" body2="L_index0"/>
+    <exclude body1="L_hand" body2="L_index1"/>
+    <exclude body1="L_hand" body2="L_index2"/>
+    <exclude body1="L_hand" body2="L_index3"/>
+    <exclude body1="L_hand" body2="L_middle0"/>
+    <exclude body1="L_hand" body2="L_middle1"/>
+    <exclude body1="L_hand" body2="L_middle2"/>
+    <exclude body1="L_hand" body2="L_middle3"/>
+    <exclude body1="L_hand" body2="L_ring0"/>
+    <exclude body1="L_hand" body2="L_ring1"/>
+    <exclude body1="L_hand" body2="L_ring2"/>
+    <exclude body1="L_hand" body2="L_ring3"/>
+    <exclude body1="L_hand" body2="L_pinky0"/>
+    <exclude body1="L_hand" body2="L_pinky1"/>
+    <exclude body1="L_hand" body2="L_pinky2"/>
+    <exclude body1="L_hand" body2="L_pinky3"/>
+    <exclude body1="L_hand" body2="L_thumb1"/>
+    <exclude body1="L_hand" body2="L_thumb2"/>
+    <exclude body1="L_hand" body2="L_thumb3"/>
+    <exclude body1="L_index0" body2="L_index1"/>
+    <exclude body1="L_index0" body2="L_index2"/>
+    <exclude body1="L_index0" body2="L_index3"/>
+    <exclude body1="L_index0" body2="L_middle0"/>
+    <exclude body1="L_index0" body2="L_middle1"/>
+    <exclude body1="L_index0" body2="L_middle2"/>
+    <exclude body1="L_index0" body2="L_middle3"/>
+    <exclude body1="L_index0" body2="L_ring0"/>
+    <exclude body1="L_index0" body2="L_ring1"/>
+    <exclude body1="L_index0" body2="L_ring2"/>
+    <exclude body1="L_index0" body2="L_ring3"/>
+    <exclude body1="L_index0" body2="L_pinky0"/>
+    <exclude body1="L_index0" body2="L_pinky1"/>
+    <exclude body1="L_index0" body2="L_pinky2"/>
+    <exclude body1="L_index0" body2="L_pinky3"/>
+    <exclude body1="L_index0" body2="L_thumb1"/>
+    <exclude body1="L_index0" body2="L_thumb2"/>
+    <exclude body1="L_index0" body2="L_thumb3"/>
+    <exclude body1="L_index1" body2="L_index2"/>
+    <exclude body1="L_index1" body2="L_index3"/>
+    <exclude body1="L_index1" body2="L_middle0"/>
+    <exclude body1="L_index1" body2="L_middle1"/>
+    <exclude body1="L_index1" body2="L_middle2"/>
+    <exclude body1="L_index1" body2="L_middle3"/>
+    <exclude body1="L_index1" body2="L_ring0"/>
+    <exclude body1="L_index1" body2="L_ring1"/>
+    <exclude body1="L_index1" body2="L_ring2"/>
+    <exclude body1="L_index1" body2="L_ring3"/>
+    <exclude body1="L_index1" body2="L_pinky0"/>
+    <exclude body1="L_index1" body2="L_pinky1"/>
+    <exclude body1="L_index1" body2="L_pinky2"/>
+    <exclude body1="L_index1" body2="L_pinky3"/>
+    <exclude body1="L_index1" body2="L_thumb1"/>
+    <exclude body1="L_index1" body2="L_thumb2"/>
+    <exclude body1="L_index1" body2="L_thumb3"/>
+    <exclude body1="L_index2" body2="L_index3"/>
+    <exclude body1="L_index2" body2="L_middle0"/>
+    <exclude body1="L_index2" body2="L_middle1"/>
+    <exclude body1="L_index2" body2="L_middle2"/>
+    <exclude body1="L_index2" body2="L_middle3"/>
+    <exclude body1="L_index2" body2="L_ring0"/>
+    <exclude body1="L_index2" body2="L_ring1"/>
+    <exclude body1="L_index2" body2="L_ring2"/>
+    <exclude body1="L_index2" body2="L_ring3"/>
+    <exclude body1="L_index2" body2="L_pinky0"/>
+    <exclude body1="L_index2" body2="L_pinky1"/>
+    <exclude body1="L_index2" body2="L_pinky2"/>
+    <exclude body1="L_index2" body2="L_pinky3"/>
+    <exclude body1="L_index2" body2="L_thumb1"/>
+    <exclude body1="L_index2" body2="L_thumb2"/>
+    <exclude body1="L_index2" body2="L_thumb3"/>
+    <exclude body1="L_index3" body2="L_middle0"/>
+    <exclude body1="L_index3" body2="L_middle1"/>
+    <exclude body1="L_index3" body2="L_middle2"/>
+    <exclude body1="L_index3" body2="L_middle3"/>
+    <exclude body1="L_index3" body2="L_ring0"/>
+    <exclude body1="L_index3" body2="L_ring1"/>
+    <exclude body1="L_index3" body2="L_ring2"/>
+    <exclude body1="L_index3" body2="L_ring3"/>
+    <exclude body1="L_index3" body2="L_pinky0"/>
+    <exclude body1="L_index3" body2="L_pinky1"/>
+    <exclude body1="L_index3" body2="L_pinky2"/>
+    <exclude body1="L_index3" body2="L_pinky3"/>
+    <exclude body1="L_index3" body2="L_thumb1"/>
+    <exclude body1="L_index3" body2="L_thumb2"/>
+    <exclude body1="L_index3" body2="L_thumb3"/>
+    <exclude body1="L_middle0" body2="L_middle1"/>
+    <exclude body1="L_middle0" body2="L_middle2"/>
+    <exclude body1="L_middle0" body2="L_middle3"/>
+    <exclude body1="L_middle0" body2="L_ring0"/>
+    <exclude body1="L_middle0" body2="L_ring1"/>
+    <exclude body1="L_middle0" body2="L_ring2"/>
+    <exclude body1="L_middle0" body2="L_ring3"/>
+    <exclude body1="L_middle0" body2="L_pinky0"/>
+    <exclude body1="L_middle0" body2="L_pinky1"/>
+    <exclude body1="L_middle0" body2="L_pinky2"/>
+    <exclude body1="L_middle0" body2="L_pinky3"/>
+    <exclude body1="L_middle0" body2="L_thumb1"/>
+    <exclude body1="L_middle0" body2="L_thumb2"/>
+    <exclude body1="L_middle0" body2="L_thumb3"/>
+    <exclude body1="L_middle1" body2="L_middle2"/>
+    <exclude body1="L_middle1" body2="L_middle3"/>
+    <exclude body1="L_middle1" body2="L_ring0"/>
+    <exclude body1="L_middle1" body2="L_ring1"/>
+    <exclude body1="L_middle1" body2="L_ring2"/>
+    <exclude body1="L_middle1" body2="L_ring3"/>
+    <exclude body1="L_middle1" body2="L_pinky0"/>
+    <exclude body1="L_middle1" body2="L_pinky1"/>
+    <exclude body1="L_middle1" body2="L_pinky2"/>
+    <exclude body1="L_middle1" body2="L_pinky3"/>
+    <exclude body1="L_middle1" body2="L_thumb1"/>
+    <exclude body1="L_middle1" body2="L_thumb2"/>
+    <exclude body1="L_middle1" body2="L_thumb3"/>
+    <exclude body1="L_middle2" body2="L_middle3"/>
+    <exclude body1="L_middle2" body2="L_ring0"/>
+    <exclude body1="L_middle2" body2="L_ring1"/>
+    <exclude body1="L_middle2" body2="L_ring2"/>
+    <exclude body1="L_middle2" body2="L_ring3"/>
+    <exclude body1="L_middle2" body2="L_pinky0"/>
+    <exclude body1="L_middle2" body2="L_pinky1"/>
+    <exclude body1="L_middle2" body2="L_pinky2"/>
+    <exclude body1="L_middle2" body2="L_pinky3"/>
+    <exclude body1="L_middle2" body2="L_thumb1"/>
+    <exclude body1="L_middle2" body2="L_thumb2"/>
+    <exclude body1="L_middle2" body2="L_thumb3"/>
+    <exclude body1="L_middle3" body2="L_ring0"/>
+    <exclude body1="L_middle3" body2="L_ring1"/>
+    <exclude body1="L_middle3" body2="L_ring2"/>
+    <exclude body1="L_middle3" body2="L_ring3"/>
+    <exclude body1="L_middle3" body2="L_pinky0"/>
+    <exclude body1="L_middle3" body2="L_pinky1"/>
+    <exclude body1="L_middle3" body2="L_pinky2"/>
+    <exclude body1="L_middle3" body2="L_pinky3"/>
+    <exclude body1="L_middle3" body2="L_thumb1"/>
+    <exclude body1="L_middle3" body2="L_thumb2"/>
+    <exclude body1="L_middle3" body2="L_thumb3"/>
+    <exclude body1="L_ring0" body2="L_ring1"/>
+    <exclude body1="L_ring0" body2="L_ring2"/>
+    <exclude body1="L_ring0" body2="L_ring3"/>
+    <exclude body1="L_ring0" body2="L_pinky0"/>
+    <exclude body1="L_ring0" body2="L_pinky1"/>
+    <exclude body1="L_ring0" body2="L_pinky2"/>
+    <exclude body1="L_ring0" body2="L_pinky3"/>
+    <exclude body1="L_ring0" body2="L_thumb1"/>
+    <exclude body1="L_ring0" body2="L_thumb2"/>
+    <exclude body1="L_ring0" body2="L_thumb3"/>
+    <exclude body1="L_ring1" body2="L_ring2"/>
+    <exclude body1="L_ring1" body2="L_ring3"/>
+    <exclude body1="L_ring1" body2="L_pinky0"/>
+    <exclude body1="L_ring1" body2="L_pinky1"/>
+    <exclude body1="L_ring1" body2="L_pinky2"/>
+    <exclude body1="L_ring1" body2="L_pinky3"/>
+    <exclude body1="L_ring1" body2="L_thumb1"/>
+    <exclude body1="L_ring1" body2="L_thumb2"/>
+    <exclude body1="L_ring1" body2="L_thumb3"/>
+    <exclude body1="L_ring2" body2="L_ring3"/>
+    <exclude body1="L_ring2" body2="L_pinky0"/>
+    <exclude body1="L_ring2" body2="L_pinky1"/>
+    <exclude body1="L_ring2" body2="L_pinky2"/>
+    <exclude body1="L_ring2" body2="L_pinky3"/>
+    <exclude body1="L_ring2" body2="L_thumb1"/>
+    <exclude body1="L_ring2" body2="L_thumb2"/>
+    <exclude body1="L_ring2" body2="L_thumb3"/>
+    <exclude body1="L_ring3" body2="L_pinky0"/>
+    <exclude body1="L_ring3" body2="L_pinky1"/>
+    <exclude body1="L_ring3" body2="L_pinky2"/>
+    <exclude body1="L_ring3" body2="L_pinky3"/>
+    <exclude body1="L_ring3" body2="L_thumb1"/>
+    <exclude body1="L_ring3" body2="L_thumb2"/>
+    <exclude body1="L_ring3" body2="L_thumb3"/>
+    <exclude body1="L_pinky0" body2="L_pinky1"/>
+    <exclude body1="L_pinky0" body2="L_pinky2"/>
+    <exclude body1="L_pinky0" body2="L_pinky3"/>
+    <exclude body1="L_pinky0" body2="L_thumb1"/>
+    <exclude body1="L_pinky0" body2="L_thumb2"/>
+    <exclude body1="L_pinky0" body2="L_thumb3"/>
+    <exclude body1="L_pinky1" body2="L_pinky2"/>
+    <exclude body1="L_pinky1" body2="L_pinky3"/>
+    <exclude body1="L_pinky1" body2="L_thumb1"/>
+    <exclude body1="L_pinky1" body2="L_thumb2"/>
+    <exclude body1="L_pinky1" body2="L_thumb3"/>
+    <exclude body1="L_pinky2" body2="L_pinky3"/>
+    <exclude body1="L_pinky2" body2="L_thumb1"/>
+    <exclude body1="L_pinky2" body2="L_thumb2"/>
+    <exclude body1="L_pinky2" body2="L_thumb3"/>
+    <exclude body1="L_pinky3" body2="L_thumb1"/>
+    <exclude body1="L_pinky3" body2="L_thumb2"/>
+    <exclude body1="L_pinky3" body2="L_thumb3"/>
+    <exclude body1="L_thumb1" body2="L_thumb2"/>
+    <exclude body1="L_thumb1" body2="L_thumb3"/>
+    <exclude body1="L_thumb2" body2="L_thumb3"/>
+    <exclude body1="R_wrist_x" body2="R_wrist_y"/>
+    <exclude body1="R_wrist_x" body2="R_wrist_z"/>
+    <exclude body1="R_wrist_x" body2="R_wrist_ry"/>
+    <exclude body1="R_wrist_x" body2="R_wrist_rx"/>
+    <exclude body1="R_wrist_x" body2="R_hand"/>
+    <exclude body1="R_wrist_x" body2="R_index0"/>
+    <exclude body1="R_wrist_x" body2="R_index1"/>
+    <exclude body1="R_wrist_x" body2="R_index2"/>
+    <exclude body1="R_wrist_x" body2="R_index3"/>
+    <exclude body1="R_wrist_x" body2="R_middle0"/>
+    <exclude body1="R_wrist_x" body2="R_middle1"/>
+    <exclude body1="R_wrist_x" body2="R_middle2"/>
+    <exclude body1="R_wrist_x" body2="R_middle3"/>
+    <exclude body1="R_wrist_x" body2="R_ring0"/>
+    <exclude body1="R_wrist_x" body2="R_ring1"/>
+    <exclude body1="R_wrist_x" body2="R_ring2"/>
+    <exclude body1="R_wrist_x" body2="R_ring3"/>
+    <exclude body1="R_wrist_x" body2="R_pinky0"/>
+    <exclude body1="R_wrist_x" body2="R_pinky1"/>
+    <exclude body1="R_wrist_x" body2="R_pinky2"/>
+    <exclude body1="R_wrist_x" body2="R_pinky3"/>
+    <exclude body1="R_wrist_x" body2="R_thumb1"/>
+    <exclude body1="R_wrist_x" body2="R_thumb2"/>
+    <exclude body1="R_wrist_x" body2="R_thumb3"/>
+    <exclude body1="R_wrist_y" body2="R_wrist_z"/>
+    <exclude body1="R_wrist_y" body2="R_wrist_ry"/>
+    <exclude body1="R_wrist_y" body2="R_wrist_rx"/>
+    <exclude body1="R_wrist_y" body2="R_hand"/>
+    <exclude body1="R_wrist_y" body2="R_index0"/>
+    <exclude body1="R_wrist_y" body2="R_index1"/>
+    <exclude body1="R_wrist_y" body2="R_index2"/>
+    <exclude body1="R_wrist_y" body2="R_index3"/>
+    <exclude body1="R_wrist_y" body2="R_middle0"/>
+    <exclude body1="R_wrist_y" body2="R_middle1"/>
+    <exclude body1="R_wrist_y" body2="R_middle2"/>
+    <exclude body1="R_wrist_y" body2="R_middle3"/>
+    <exclude body1="R_wrist_y" body2="R_ring0"/>
+    <exclude body1="R_wrist_y" body2="R_ring1"/>
+    <exclude body1="R_wrist_y" body2="R_ring2"/>
+    <exclude body1="R_wrist_y" body2="R_ring3"/>
+    <exclude body1="R_wrist_y" body2="R_pinky0"/>
+    <exclude body1="R_wrist_y" body2="R_pinky1"/>
+    <exclude body1="R_wrist_y" body2="R_pinky2"/>
+    <exclude body1="R_wrist_y" body2="R_pinky3"/>
+    <exclude body1="R_wrist_y" body2="R_thumb1"/>
+    <exclude body1="R_wrist_y" body2="R_thumb2"/>
+    <exclude body1="R_wrist_y" body2="R_thumb3"/>
+    <exclude body1="R_wrist_z" body2="R_wrist_ry"/>
+    <exclude body1="R_wrist_z" body2="R_wrist_rx"/>
+    <exclude body1="R_wrist_z" body2="R_hand"/>
+    <exclude body1="R_wrist_z" body2="R_index0"/>
+    <exclude body1="R_wrist_z" body2="R_index1"/>
+    <exclude body1="R_wrist_z" body2="R_index2"/>
+    <exclude body1="R_wrist_z" body2="R_index3"/>
+    <exclude body1="R_wrist_z" body2="R_middle0"/>
+    <exclude body1="R_wrist_z" body2="R_middle1"/>
+    <exclude body1="R_wrist_z" body2="R_middle2"/>
+    <exclude body1="R_wrist_z" body2="R_middle3"/>
+    <exclude body1="R_wrist_z" body2="R_ring0"/>
+    <exclude body1="R_wrist_z" body2="R_ring1"/>
+    <exclude body1="R_wrist_z" body2="R_ring2"/>
+    <exclude body1="R_wrist_z" body2="R_ring3"/>
+    <exclude body1="R_wrist_z" body2="R_pinky0"/>
+    <exclude body1="R_wrist_z" body2="R_pinky1"/>
+    <exclude body1="R_wrist_z" body2="R_pinky2"/>
+    <exclude body1="R_wrist_z" body2="R_pinky3"/>
+    <exclude body1="R_wrist_z" body2="R_thumb1"/>
+    <exclude body1="R_wrist_z" body2="R_thumb2"/>
+    <exclude body1="R_wrist_z" body2="R_thumb3"/>
+    <exclude body1="R_wrist_ry" body2="R_wrist_rx"/>
+    <exclude body1="R_wrist_ry" body2="R_hand"/>
+    <exclude body1="R_wrist_ry" body2="R_index0"/>
+    <exclude body1="R_wrist_ry" body2="R_index1"/>
+    <exclude body1="R_wrist_ry" body2="R_index2"/>
+    <exclude body1="R_wrist_ry" body2="R_index3"/>
+    <exclude body1="R_wrist_ry" body2="R_middle0"/>
+    <exclude body1="R_wrist_ry" body2="R_middle1"/>
+    <exclude body1="R_wrist_ry" body2="R_middle2"/>
+    <exclude body1="R_wrist_ry" body2="R_middle3"/>
+    <exclude body1="R_wrist_ry" body2="R_ring0"/>
+    <exclude body1="R_wrist_ry" body2="R_ring1"/>
+    <exclude body1="R_wrist_ry" body2="R_ring2"/>
+    <exclude body1="R_wrist_ry" body2="R_ring3"/>
+    <exclude body1="R_wrist_ry" body2="R_pinky0"/>
+    <exclude body1="R_wrist_ry" body2="R_pinky1"/>
+    <exclude body1="R_wrist_ry" body2="R_pinky2"/>
+    <exclude body1="R_wrist_ry" body2="R_pinky3"/>
+    <exclude body1="R_wrist_ry" body2="R_thumb1"/>
+    <exclude body1="R_wrist_ry" body2="R_thumb2"/>
+    <exclude body1="R_wrist_ry" body2="R_thumb3"/>
+    <exclude body1="R_wrist_rx" body2="R_hand"/>
+    <exclude body1="R_wrist_rx" body2="R_index0"/>
+    <exclude body1="R_wrist_rx" body2="R_index1"/>
+    <exclude body1="R_wrist_rx" body2="R_index2"/>
+    <exclude body1="R_wrist_rx" body2="R_index3"/>
+    <exclude body1="R_wrist_rx" body2="R_middle0"/>
+    <exclude body1="R_wrist_rx" body2="R_middle1"/>
+    <exclude body1="R_wrist_rx" body2="R_middle2"/>
+    <exclude body1="R_wrist_rx" body2="R_middle3"/>
+    <exclude body1="R_wrist_rx" body2="R_ring0"/>
+    <exclude body1="R_wrist_rx" body2="R_ring1"/>
+    <exclude body1="R_wrist_rx" body2="R_ring2"/>
+    <exclude body1="R_wrist_rx" body2="R_ring3"/>
+    <exclude body1="R_wrist_rx" body2="R_pinky0"/>
+    <exclude body1="R_wrist_rx" body2="R_pinky1"/>
+    <exclude body1="R_wrist_rx" body2="R_pinky2"/>
+    <exclude body1="R_wrist_rx" body2="R_pinky3"/>
+    <exclude body1="R_wrist_rx" body2="R_thumb1"/>
+    <exclude body1="R_wrist_rx" body2="R_thumb2"/>
+    <exclude body1="R_wrist_rx" body2="R_thumb3"/>
+    <exclude body1="R_hand" body2="R_index0"/>
+    <exclude body1="R_hand" body2="R_index1"/>
+    <exclude body1="R_hand" body2="R_index2"/>
+    <exclude body1="R_hand" body2="R_index3"/>
+    <exclude body1="R_hand" body2="R_middle0"/>
+    <exclude body1="R_hand" body2="R_middle1"/>
+    <exclude body1="R_hand" body2="R_middle2"/>
+    <exclude body1="R_hand" body2="R_middle3"/>
+    <exclude body1="R_hand" body2="R_ring0"/>
+    <exclude body1="R_hand" body2="R_ring1"/>
+    <exclude body1="R_hand" body2="R_ring2"/>
+    <exclude body1="R_hand" body2="R_ring3"/>
+    <exclude body1="R_hand" body2="R_pinky0"/>
+    <exclude body1="R_hand" body2="R_pinky1"/>
+    <exclude body1="R_hand" body2="R_pinky2"/>
+    <exclude body1="R_hand" body2="R_pinky3"/>
+    <exclude body1="R_hand" body2="R_thumb1"/>
+    <exclude body1="R_hand" body2="R_thumb2"/>
+    <exclude body1="R_hand" body2="R_thumb3"/>
+    <exclude body1="R_index0" body2="R_index1"/>
+    <exclude body1="R_index0" body2="R_index2"/>
+    <exclude body1="R_index0" body2="R_index3"/>
+    <exclude body1="R_index0" body2="R_middle0"/>
+    <exclude body1="R_index0" body2="R_middle1"/>
+    <exclude body1="R_index0" body2="R_middle2"/>
+    <exclude body1="R_index0" body2="R_middle3"/>
+    <exclude body1="R_index0" body2="R_ring0"/>
+    <exclude body1="R_index0" body2="R_ring1"/>
+    <exclude body1="R_index0" body2="R_ring2"/>
+    <exclude body1="R_index0" body2="R_ring3"/>
+    <exclude body1="R_index0" body2="R_pinky0"/>
+    <exclude body1="R_index0" body2="R_pinky1"/>
+    <exclude body1="R_index0" body2="R_pinky2"/>
+    <exclude body1="R_index0" body2="R_pinky3"/>
+    <exclude body1="R_index0" body2="R_thumb1"/>
+    <exclude body1="R_index0" body2="R_thumb2"/>
+    <exclude body1="R_index0" body2="R_thumb3"/>
+    <exclude body1="R_index1" body2="R_index2"/>
+    <exclude body1="R_index1" body2="R_index3"/>
+    <exclude body1="R_index1" body2="R_middle0"/>
+    <exclude body1="R_index1" body2="R_middle1"/>
+    <exclude body1="R_index1" body2="R_middle2"/>
+    <exclude body1="R_index1" body2="R_middle3"/>
+    <exclude body1="R_index1" body2="R_ring0"/>
+    <exclude body1="R_index1" body2="R_ring1"/>
+    <exclude body1="R_index1" body2="R_ring2"/>
+    <exclude body1="R_index1" body2="R_ring3"/>
+    <exclude body1="R_index1" body2="R_pinky0"/>
+    <exclude body1="R_index1" body2="R_pinky1"/>
+    <exclude body1="R_index1" body2="R_pinky2"/>
+    <exclude body1="R_index1" body2="R_pinky3"/>
+    <exclude body1="R_index1" body2="R_thumb1"/>
+    <exclude body1="R_index1" body2="R_thumb2"/>
+    <exclude body1="R_index1" body2="R_thumb3"/>
+    <exclude body1="R_index2" body2="R_index3"/>
+    <exclude body1="R_index2" body2="R_middle0"/>
+    <exclude body1="R_index2" body2="R_middle1"/>
+    <exclude body1="R_index2" body2="R_middle2"/>
+    <exclude body1="R_index2" body2="R_middle3"/>
+    <exclude body1="R_index2" body2="R_ring0"/>
+    <exclude body1="R_index2" body2="R_ring1"/>
+    <exclude body1="R_index2" body2="R_ring2"/>
+    <exclude body1="R_index2" body2="R_ring3"/>
+    <exclude body1="R_index2" body2="R_pinky0"/>
+    <exclude body1="R_index2" body2="R_pinky1"/>
+    <exclude body1="R_index2" body2="R_pinky2"/>
+    <exclude body1="R_index2" body2="R_pinky3"/>
+    <exclude body1="R_index2" body2="R_thumb1"/>
+    <exclude body1="R_index2" body2="R_thumb2"/>
+    <exclude body1="R_index2" body2="R_thumb3"/>
+    <exclude body1="R_index3" body2="R_middle0"/>
+    <exclude body1="R_index3" body2="R_middle1"/>
+    <exclude body1="R_index3" body2="R_middle2"/>
+    <exclude body1="R_index3" body2="R_middle3"/>
+    <exclude body1="R_index3" body2="R_ring0"/>
+    <exclude body1="R_index3" body2="R_ring1"/>
+    <exclude body1="R_index3" body2="R_ring2"/>
+    <exclude body1="R_index3" body2="R_ring3"/>
+    <exclude body1="R_index3" body2="R_pinky0"/>
+    <exclude body1="R_index3" body2="R_pinky1"/>
+    <exclude body1="R_index3" body2="R_pinky2"/>
+    <exclude body1="R_index3" body2="R_pinky3"/>
+    <exclude body1="R_index3" body2="R_thumb1"/>
+    <exclude body1="R_index3" body2="R_thumb2"/>
+    <exclude body1="R_index3" body2="R_thumb3"/>
+    <exclude body1="R_middle0" body2="R_middle1"/>
+    <exclude body1="R_middle0" body2="R_middle2"/>
+    <exclude body1="R_middle0" body2="R_middle3"/>
+    <exclude body1="R_middle0" body2="R_ring0"/>
+    <exclude body1="R_middle0" body2="R_ring1"/>
+    <exclude body1="R_middle0" body2="R_ring2"/>
+    <exclude body1="R_middle0" body2="R_ring3"/>
+    <exclude body1="R_middle0" body2="R_pinky0"/>
+    <exclude body1="R_middle0" body2="R_pinky1"/>
+    <exclude body1="R_middle0" body2="R_pinky2"/>
+    <exclude body1="R_middle0" body2="R_pinky3"/>
+    <exclude body1="R_middle0" body2="R_thumb1"/>
+    <exclude body1="R_middle0" body2="R_thumb2"/>
+    <exclude body1="R_middle0" body2="R_thumb3"/>
+    <exclude body1="R_middle1" body2="R_middle2"/>
+    <exclude body1="R_middle1" body2="R_middle3"/>
+    <exclude body1="R_middle1" body2="R_ring0"/>
+    <exclude body1="R_middle1" body2="R_ring1"/>
+    <exclude body1="R_middle1" body2="R_ring2"/>
+    <exclude body1="R_middle1" body2="R_ring3"/>
+    <exclude body1="R_middle1" body2="R_pinky0"/>
+    <exclude body1="R_middle1" body2="R_pinky1"/>
+    <exclude body1="R_middle1" body2="R_pinky2"/>
+    <exclude body1="R_middle1" body2="R_pinky3"/>
+    <exclude body1="R_middle1" body2="R_thumb1"/>
+    <exclude body1="R_middle1" body2="R_thumb2"/>
+    <exclude body1="R_middle1" body2="R_thumb3"/>
+    <exclude body1="R_middle2" body2="R_middle3"/>
+    <exclude body1="R_middle2" body2="R_ring0"/>
+    <exclude body1="R_middle2" body2="R_ring1"/>
+    <exclude body1="R_middle2" body2="R_ring2"/>
+    <exclude body1="R_middle2" body2="R_ring3"/>
+    <exclude body1="R_middle2" body2="R_pinky0"/>
+    <exclude body1="R_middle2" body2="R_pinky1"/>
+    <exclude body1="R_middle2" body2="R_pinky2"/>
+    <exclude body1="R_middle2" body2="R_pinky3"/>
+    <exclude body1="R_middle2" body2="R_thumb1"/>
+    <exclude body1="R_middle2" body2="R_thumb2"/>
+    <exclude body1="R_middle2" body2="R_thumb3"/>
+    <exclude body1="R_middle3" body2="R_ring0"/>
+    <exclude body1="R_middle3" body2="R_ring1"/>
+    <exclude body1="R_middle3" body2="R_ring2"/>
+    <exclude body1="R_middle3" body2="R_ring3"/>
+    <exclude body1="R_middle3" body2="R_pinky0"/>
+    <exclude body1="R_middle3" body2="R_pinky1"/>
+    <exclude body1="R_middle3" body2="R_pinky2"/>
+    <exclude body1="R_middle3" body2="R_pinky3"/>
+    <exclude body1="R_middle3" body2="R_thumb1"/>
+    <exclude body1="R_middle3" body2="R_thumb2"/>
+    <exclude body1="R_middle3" body2="R_thumb3"/>
+    <exclude body1="R_ring0" body2="R_ring1"/>
+    <exclude body1="R_ring0" body2="R_ring2"/>
+    <exclude body1="R_ring0" body2="R_ring3"/>
+    <exclude body1="R_ring0" body2="R_pinky0"/>
+    <exclude body1="R_ring0" body2="R_pinky1"/>
+    <exclude body1="R_ring0" body2="R_pinky2"/>
+    <exclude body1="R_ring0" body2="R_pinky3"/>
+    <exclude body1="R_ring0" body2="R_thumb1"/>
+    <exclude body1="R_ring0" body2="R_thumb2"/>
+    <exclude body1="R_ring0" body2="R_thumb3"/>
+    <exclude body1="R_ring1" body2="R_ring2"/>
+    <exclude body1="R_ring1" body2="R_ring3"/>
+    <exclude body1="R_ring1" body2="R_pinky0"/>
+    <exclude body1="R_ring1" body2="R_pinky1"/>
+    <exclude body1="R_ring1" body2="R_pinky2"/>
+    <exclude body1="R_ring1" body2="R_pinky3"/>
+    <exclude body1="R_ring1" body2="R_thumb1"/>
+    <exclude body1="R_ring1" body2="R_thumb2"/>
+    <exclude body1="R_ring1" body2="R_thumb3"/>
+    <exclude body1="R_ring2" body2="R_ring3"/>
+    <exclude body1="R_ring2" body2="R_pinky0"/>
+    <exclude body1="R_ring2" body2="R_pinky1"/>
+    <exclude body1="R_ring2" body2="R_pinky2"/>
+    <exclude body1="R_ring2" body2="R_pinky3"/>
+    <exclude body1="R_ring2" body2="R_thumb1"/>
+    <exclude body1="R_ring2" body2="R_thumb2"/>
+    <exclude body1="R_ring2" body2="R_thumb3"/>
+    <exclude body1="R_ring3" body2="R_pinky0"/>
+    <exclude body1="R_ring3" body2="R_pinky1"/>
+    <exclude body1="R_ring3" body2="R_pinky2"/>
+    <exclude body1="R_ring3" body2="R_pinky3"/>
+    <exclude body1="R_ring3" body2="R_thumb1"/>
+    <exclude body1="R_ring3" body2="R_thumb2"/>
+    <exclude body1="R_ring3" body2="R_thumb3"/>
+    <exclude body1="R_pinky0" body2="R_pinky1"/>
+    <exclude body1="R_pinky0" body2="R_pinky2"/>
+    <exclude body1="R_pinky0" body2="R_pinky3"/>
+    <exclude body1="R_pinky0" body2="R_thumb1"/>
+    <exclude body1="R_pinky0" body2="R_thumb2"/>
+    <exclude body1="R_pinky0" body2="R_thumb3"/>
+    <exclude body1="R_pinky1" body2="R_pinky2"/>
+    <exclude body1="R_pinky1" body2="R_pinky3"/>
+    <exclude body1="R_pinky1" body2="R_thumb1"/>
+    <exclude body1="R_pinky1" body2="R_thumb2"/>
+    <exclude body1="R_pinky1" body2="R_thumb3"/>
+    <exclude body1="R_pinky2" body2="R_pinky3"/>
+    <exclude body1="R_pinky2" body2="R_thumb1"/>
+    <exclude body1="R_pinky2" body2="R_thumb2"/>
+    <exclude body1="R_pinky2" body2="R_thumb3"/>
+    <exclude body1="R_pinky3" body2="R_thumb1"/>
+    <exclude body1="R_pinky3" body2="R_thumb2"/>
+    <exclude body1="R_pinky3" body2="R_thumb3"/>
+    <exclude body1="R_thumb1" body2="R_thumb2"/>
+    <exclude body1="R_thumb1" body2="R_thumb3"/>
+    <exclude body1="R_thumb2" body2="R_thumb3"/>
+  </contact>
+
+  <equality>
+    <weld name="rig_weld" body1="rig" anchor="0 1 0" relpose="0 1 0 1 0 0 0"/>
+  </equality>
+</mujoco>

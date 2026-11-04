@@ -20,8 +20,9 @@ import numpy as np
 import tyro
 from PIL import Image, ImageDraw, ImageFont
 
-from supermimic.data.glove_taxels import fitted_adjust, taxel_layout, world_taxels
+from supermimic.data.glove_taxels import fitted_adjust, glove_layout, taxel_layout, world_taxels
 from supermimic.data.sweep_mocap import taxel_load
+from supermimic.robots import HAND_DATA
 
 ROOT = Path(__file__).resolve().parents[2]
 HELD = {"L": "cleaningtools_broom", "R": "cleaningtools_dustpan"}
@@ -44,7 +45,7 @@ def shifted(shift_mm: dict[str, float]) -> dict:
     return out
 
 
-def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.npz", time: float = 7.0,
+def main(out: Path, clip: Path = HAND_DATA / "sweep_task023_hands_registered_closed.npz", time: float = 7.0,
          left_shift: str = "palm=-10", right_shift: str = "fingers=-8", left_scores: str = "0.235 -> 0.256",
          right_scores: str = "0.172 -> 0.191", tile: int = 640) -> None:
     """``*_shift``: comma-separated group=mm (``palm``, ``fingers`` or a layout group); ``*_scores``: caption text."""
@@ -99,11 +100,11 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands_register
         rgba[on, :3] = np.stack([np.ones(on.sum()), 0.9 * (1 - rel[on]), 0.1 * (1 - rel[on])], -1)
         tree = cKDTree(prop_points(HELD[S]))
         hand = model.body(f"{S}_hand").id
-        lay0 = taxel_layout(model, S, fitted_adjust())
+        lay0 = glove_layout(model, S)
         n_local = lay0.normal[lay0.body == hand].mean(0)
         n = data.xmat[hand].reshape(3, 3) @ (n_local / np.linalg.norm(n_local))
         for title, adjust in (("fitted layout", fitted_adjust()), (f"shifted: {spec} mm", shifted(sh))):
-            pos, nrm = world_taxels(data, taxel_layout(model, S, adjust))
+            pos, nrm = world_taxels(data, taxel_layout(model, S, adjust, roll=True))
             near = tree.query(pos)[0] < 0.005
             cam = mujoco.MjvCamera()
             cam.type = mujoco.mjtCamera.mjCAMERA_FREE

@@ -27,11 +27,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_capsule_hands import HELD_CANDIDATES, REGION_BODIES, SIDE_NAME, SIDES, Hands, Reference, build, kinematic_audit
 
 from supermimic.data.sweep_mocap import REGIONS
+from supermimic.robots import HAND_DATA
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def main(clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", out: Path | None = None, props_dir: Path = ROOT / "data/props",
+def main(clip: Path = HAND_DATA / "sweep_task023_hands.npz", out: Path | None = None, props_dir: Path = ROOT / "data/props",
          grasp_gap: float = 0.03, allow_pen: float = 0.002, pen_weight: float = 20.0, max_shift: float = 0.05, n_frames: int = 60,
          blend_s: float = 0.25) -> None:
     """``grasp_gap``: a hand grasps its prop on frames with a loaded glove region within this gap of it."""

@@ -17,11 +17,11 @@ import mujoco
 import numpy as np
 import tyro
 
-from supermimic.data.glove_taxels import fitted_adjust, taxel_layout
+from supermimic.data.glove_taxels import glove_layout
 from supermimic.data.sweep_mocap import REGIONS, region_loaded
+from supermimic.robots import HAND_DATA, HANDS_XML
 
 ROOT = Path(__file__).resolve().parents[2]
-HANDS_XML = ROOT / "src/supermimic/assets/capsule_hands/capsule_hands.xml"
 SIDES = ("L", "R")
 SIDE_NAME = {"L": "left", "R": "right"}
 HELD = {"L": "cleaningtools_broom", "R": "cleaningtools_dustpan"}
@@ -32,7 +32,7 @@ def build(props_dir: Path) -> mujoco.MjModel:
     spec = mujoco.MjSpec.from_file(str(HANDS_XML))
     base = spec.compile()
     for S in SIDES:
-        lay = taxel_layout(base, S, fitted_adjust())
+        lay = glove_layout(base, S)
         for i in range(129):
             spec.body(base.body(int(lay.body[i])).name).add_geom(
                 name=f"{S}_taxel{i:03d}", type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[TAXEL_R, 0, 0], pos=lay.pos[i],
@@ -45,11 +45,11 @@ def build(props_dir: Path) -> mujoco.MjModel:
     return spec.compile()
 
 
-def main(clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", props_dir: Path = ROOT / "data/props", reach: float = 0.05) -> None:
+def main(clip: Path = HAND_DATA / "sweep_task023_hands.npz", props_dir: Path = ROOT / "data/props", reach: float = 0.05) -> None:
     c = dict(np.load(clip))
     model = build(props_dir)
     data = mujoco.MjData(model)
-    lay = {S: taxel_layout(model, S, fitted_adjust()) for S in SIDES}
+    lay = {S: glove_layout(model, S) for S in SIDES}
     names = [str(n) for n in c["joint_names"]]
     qadr = np.array([model.jnt_qposadr[model.joint(n).id] for n in names])
     root = {S: model.jnt_qposadr[model.joint(f"{S}_hand_root").id] for S in SIDES}

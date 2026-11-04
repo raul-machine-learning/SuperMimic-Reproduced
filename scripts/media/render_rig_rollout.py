@@ -20,11 +20,12 @@ import tyro
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from render_capsule_hands import main as render
+from supermimic.robots import HAND_DATA
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def main(rollout: Path, out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.npz", index: int = 0,
+def main(rollout: Path, out: Path, clip: Path = HAND_DATA / "sweep_task023_hands_registered_closed.npz", index: int = 0,
          title: str = "Capsule hands: learned tracking policy", subtitle: str = "physics, hands in the air", fps: int = 30,
          seconds: float | None = None) -> None:
     """``seconds``: render only the first part of the rollout. Glove taxels are drawn on the simulated hands, colored by

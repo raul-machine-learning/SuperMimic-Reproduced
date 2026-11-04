@@ -29,9 +29,9 @@ from scipy.spatial.transform import Rotation
 
 from supermimic.data.glove_taxels import FIT_FILE, adjust_groups, taxel_layout
 from supermimic.data.sweep_mocap import REGIONS, taxel_pressed
+from supermimic.robots import HAND_DATA, HANDS_XML
 
 ROOT = Path(__file__).resolve().parents[2]
-HANDS_XML = ROOT / "src/supermimic/assets/capsule_hands/capsule_hands.xml"
 SIDES = ("L", "R")
 SIDE_NAME = {"L": "left", "R": "right"}
 HELD = {"L": "cleaningtools_broom", "R": "cleaningtools_dustpan"}
@@ -69,7 +69,7 @@ def prop_cloud(props_dir: Path, name: str, spacing: float) -> tuple[np.ndarray, 
     return np.concatenate(pts), np.concatenate(nrm)
 
 
-def main(clip: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.npz", props_dir: Path = ROOT / "data/props",
+def main(clip: Path = HAND_DATA / "sweep_task023_hands_registered_closed.npz", props_dir: Path = ROOT / "data/props",
          touch: float = 0.005, soft: float = 0.002, max_frames: int = 200, prior: float = 0.05, spacing: float = 0.0015,
          write: bool = True) -> None:
     c = dict(np.load(clip))
@@ -136,7 +136,7 @@ def main(clip: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.n
         adj = unpack(z)
         tot = 0.0
         for S in SIDES:
-            s = signed_dist(S, taxel_layout(model, S, adj))
+            s = signed_dist(S, taxel_layout(model, S, adj, roll=True))
             y = pressed[S][frames[S]]
             pr = np.clip(1 / (1 + np.exp((s - touch) / soft)), 1e-6, 1 - 1e-6)
             w_pos = 0.5 / max(y.mean(), 1e-6)
@@ -149,7 +149,7 @@ def main(clip: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.n
         print(tag)
         out = {}
         for S in SIDES:
-            s = signed_dist(S, taxel_layout(model, S, adj))
+            s = signed_dist(S, taxel_layout(model, S, adj, roll=True))
             y = pressed[S][frames[S]]
             hit = s < touch
             print(f"  {SIDE_NAME[S]} hand ({HELD[S].removeprefix('cleaningtools_')}): pressed taxels touching (recall), touching taxels pressed (precision)")

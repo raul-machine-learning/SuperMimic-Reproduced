@@ -16,11 +16,11 @@ import tyro
 
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp.motion_library import discover_npz
-from supermimic.robots import ROBOT
+from supermimic.robots import HAND_CLIPS, ROBOT
 
 
 @torch.no_grad()
-def main(ckpt: Path, policy_ckpt: Path | None = None, npz_dir: Path = Path("data/npz/capsule_hands"), num_envs: int = 256, steps: int = 400,
+def main(ckpt: Path, policy_ckpt: Path | None = None, npz_dir: Path = HAND_CLIPS, num_envs: int = 256, steps: int = 400,
          device: str = "cuda:0", seed: int = 2, fit_steps: int = 0) -> None:
     """``fit_steps`` > 0: also fit a fresh force head on three quarters of the envs' true states and report it on the
     rest (how accurate the head can get without the world model's prediction drift)."""

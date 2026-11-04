@@ -24,13 +24,14 @@ import mujoco
 import numpy as np
 import tyro
 from scipy.spatial.transform import Rotation, Slerp
+from supermimic.robots import HAND_CLIPS, HAND_DATA
 
 PROP_SOURCES = {"broom": "cleaningtools_broom", "dustpan": "cleaningtools_dustpan"}
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def main(src: Path = ROOT / "data/hands/sweep_task023_hands_registered_closed.npz",
-         out: Path = ROOT / "data/npz/capsule_hands/sweep_task023.npz", fps: float = 50.0, min_hold: float = 0.5,
+def main(src: Path = HAND_DATA / "sweep_task023_hands_registered_closed.npz",
+         out: Path = HAND_CLIPS / "sweep_task023.npz", fps: float = 50.0, min_hold: float = 0.5,
          load_floor: float = 3.0, hold_rel: float = 0.35, hold_floor: float = 30.0) -> None:
     from supermimic.data.motion_convert import ResampledMotion, _so3_derivative, forward_kinematics
     from supermimic.robots import ROBOT

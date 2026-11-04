@@ -26,9 +26,9 @@ import tyro
 from PIL import Image, ImageDraw, ImageFont
 
 from supermimic.data.sweep_mocap import PROP_MESHES
+from supermimic.robots import HAND_DATA, HANDS_XML
 
 ROOT = Path(__file__).resolve().parents[2]
-HANDS_XML = ROOT / "src/supermimic/assets/capsule_hands/capsule_hands.xml"
 STATE_RGBA = {1: np.array([0.15, 0.85, 0.30, 1.0]), 2: np.array([1.0, 0.80, 0.10, 1.0]), 3: np.array([0.95, 0.15, 0.15, 1.0])}
 LEGENDS = {
     "audit": [(1, "touching the held prop (gap < 5 mm)"), (2, "glove loaded, gap < 2 cm"), (3, "glove loaded, gap > 2 cm")],
@@ -106,7 +106,7 @@ def pressure_rgba(f: np.ndarray) -> np.ndarray:
     return out
 
 
-def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", rollout: Path | None = None, mocap_dir: Path | None = None,
+def main(out: Path, clip: Path = HAND_DATA / "sweep_task023_hands.npz", rollout: Path | None = None, mocap_dir: Path | None = None,
          title: str = "Capsule hands: mocap replay", subtitle: str = "kinematic replay, no physics", fps: int = 30,
          width: int = 1600, height: int = 900, hand_distance: float = 0.42, view_yaw: float = 35.0, ghosts: bool | None = None,
          legend: str | None = None, taxels: bool = False, mocap_dots: bool = True, palm_view: bool = False) -> None:
@@ -135,16 +135,16 @@ def main(out: Path, clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", ro
             state_geoms[S] = [[g for g in range(model.ngeom) if model.geom_bodyid[g] == b] for b in ids]
     base_rgba = model.geom_rgba.copy()
     if taxels:
-        from supermimic.data.glove_taxels import fitted_adjust, taxel_layout, world_taxels
+        from supermimic.data.glove_taxels import glove_layout, world_taxels
 
-        layouts = [taxel_layout(model, S, fitted_adjust()) for S in sides]
+        layouts = [glove_layout(model, S) for S in sides]
     if palm_view:
-        from supermimic.data.glove_taxels import fitted_adjust, taxel_layout
+        from supermimic.data.glove_taxels import glove_layout
 
         palm_body = {S: model.body(f"{S}_hand").id for S in sides}
         palm_normal = {}
         for S in sides:
-            lay = taxel_layout(model, S, fitted_adjust())
+            lay = glove_layout(model, S)
             n = lay.normal[lay.body == palm_body[S]].mean(0)
             palm_normal[S] = n / np.linalg.norm(n)
         prop_geoms = [g for g in range(model.ngeom) if model.body(model.geom_bodyid[g]).name in props]

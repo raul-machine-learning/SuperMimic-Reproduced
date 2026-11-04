@@ -125,12 +125,13 @@ def test_taxels_ride_on_simulated_capsules():
     try:
         cmd = env.command_manager.get_term("motion")
         glove, m, robot = sim_glove(cmd), env.sim.mj_model, cmd.robot
-        # Collision capsules of each taxel's body: (H, 129, K) geom ids, -1 padded.
+        # Collision capsules or boxes of each taxel's body: (H, 129, K) geom ids, -1 padded.
         geoms = {b: [g for g in range(m.ngeom) if m.geom_bodyid[g] == m.body(f"robot/{robot.body_names[b]}").id
-                     and m.geom_type[g] == 3 and m.geom(g).name.endswith("_collision")] for b in glove.body.unique().tolist()}
+                     and m.geom_type[g] in (3, 6) and m.geom(g).name.endswith("_collision")] for b in glove.body.unique().tolist()}
         K = max(len(v) for v in geoms.values())
         ids = torch.tensor([[(geoms[b] + [-1] * K)[:K] for b in row] for row in glove.body.tolist()], device=env.device)
         size = torch.as_tensor(m.geom_size, dtype=torch.float32, device=env.device)
+        is_box = torch.as_tensor(m.geom_type == 6, device=env.device)
         torch.manual_seed(0)
         start = None
         for step in range(150):
@@ -139,10 +140,14 @@ def test_taxels_ride_on_simulated_capsules():
             x = glove.taxels_world(robot.data.body_link_pos_w, robot.data.body_link_quat_w)  # (N, H, 129, 3)
             gi = ids.clamp(min=0)
             c = env.sim.data.geom_xpos[:, gi]  # (N, H, 129, K, 3)
-            ax = env.sim.data.geom_xmat[:, gi][..., :, 2]
+            R = env.sim.data.geom_xmat[:, gi].reshape(*c.shape[:-1], 3, 3)
+            ax = R[..., :, 2]
             half, rad = size[gi, 1], size[gi, 0]
             s = ((x[..., None, :] - c) * ax).sum(-1).clamp(-half, half)
             gap = ((x[..., None, :] - (c + s[..., None] * ax)).norm(dim=-1) - rad).abs()
+            q = torch.einsum("...ji,...j->...i", R, x[..., None, :] - c).abs() - size[gi]
+            box_gap = (q.clamp(min=0).norm(dim=-1) + q.amax(-1).clamp(max=0)).abs()
+            gap = torch.where(is_box[gi], box_gap, gap)
             gap = torch.where(ids >= 0, gap, torch.inf).amin(-1)  # (N, H, 129)
             lo, hi = (gap, gap) if step == 0 else (torch.minimum(lo, gap), torch.maximum(hi, gap))
             start = x if start is None else start

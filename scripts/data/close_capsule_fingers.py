@@ -30,6 +30,7 @@ from supermimic.data.sweep_mocap import REGIONS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "assets"))
 from build_capsule_hands import median_pose
+from supermimic.robots import HAND_DATA
 
 ROOT = Path(__file__).resolve().parents[2]
 # share of the closure each hinge takes, by its position along the finger; the sign of each hinge is the one that
@@ -41,7 +42,7 @@ CLOSE_JOINTS = {"thumb": ((1, "spread"), (2, "flex"), (3, "flex")),
                 **{f: ((1, "flex"), (2, "flex"), (3, "flex")) for f in ("index", "middle", "ring", "pinky")}}
 
 
-def main(clip: Path = ROOT / "data/hands/sweep_task023_hands.npz", out: Path | None = None, props_dir: Path = ROOT / "data/props",
+def main(clip: Path = HAND_DATA / "sweep_task023_hands.npz", out: Path | None = None, props_dir: Path = ROOT / "data/props",
          max_close: float = 1.2, step: float = 0.04, contact: float = 0.001, dilate_s: float = 0.1, smooth_s: float = 0.1,
          ignore: tuple[str, ...] = ()) -> None:
     """``contact``: gap (m) that counts as touching; ``ignore``: fingers never closed."""

@@ -18,11 +18,11 @@ from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp.motion_library import discover_npz
 from supermimic.envs.mdp.rewards import grip_pressure_agreement_sim
 from supermimic.eval.benchmark import load_policy_from_checkpoint
-from supermimic.robots import ROBOT
+from supermimic.robots import HAND_CLIPS, ROBOT
 
 
 @torch.no_grad()
-def main(ckpt: Path, clip: str = "sweep_task023", npz_dir: Path = Path("data/npz/capsule_hands"), num_envs: int = 128,
+def main(ckpt: Path, clip: str = "sweep_task023", npz_dir: Path = HAND_CLIPS, num_envs: int = 128,
          action_noise_std: float = 0.0, reset_noise: bool = True, domain_randomization: bool = True, obs_noise: bool = True,
          device: str = "cuda:0", seed: int = 1) -> None:
     files = [str(f) for f in discover_npz(npz_dir, names=[clip])]

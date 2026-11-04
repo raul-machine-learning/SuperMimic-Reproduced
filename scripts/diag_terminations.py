@@ -17,11 +17,11 @@ import tyro
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp import grip_assist
 from supermimic.envs.mdp.motion_library import discover_npz
-from supermimic.robots import ROBOT
+from supermimic.robots import HAND_CLIPS, ROBOT
 
 
 @torch.no_grad()
-def main(assist: float = 1.0, clip: str = "sweep_task023", npz_dir: Path = Path("data/npz/capsule_hands"), num_envs: int = 512,
+def main(assist: float = 1.0, clip: str = "sweep_task023", npz_dir: Path = HAND_CLIPS, num_envs: int = 512,
          steps: int = 400, action_noise_std: float = 0.1, reset_noise: bool = True, domain_randomization: bool = True,
          device: str = "cuda:0") -> None:
     files = [str(f) for f in discover_npz(npz_dir, names=[clip])]

@@ -18,7 +18,7 @@ import tyro
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp import grip_assist
 from supermimic.envs.mdp.motion_library import discover_npz
-from supermimic.robots import ROBOT
+from supermimic.robots import HAND_CLIPS, ROBOT
 
 GROUPS = {
     "flex1": r"{S}_(index|middle|ring|pinky)1_flex", "flex2": r"{S}_(index|middle|ring|pinky)2_flex",
@@ -29,7 +29,7 @@ GROUPS = {
 
 
 @torch.no_grad()
-def main(side: str = "L", clip: str = "sweep_task023", npz_dir: Path = Path("data/npz/capsule_hands"), pop: int = 512, elites: int = 32,
+def main(side: str = "L", clip: str = "sweep_task023", npz_dir: Path = HAND_CLIPS, pop: int = 512, elites: int = 32,
          generations: int = 6, horizon: int = 600, other_level: float = 0.6, init_flex: float = 0.6, init_std: float = 0.4,
          robust: bool = False, from_robot: bool = False, device: str = "cuda:0", seed: int = 0) -> None:
     """``robust``: score under the training perturbations (action / reset noise, domain randomisation).
