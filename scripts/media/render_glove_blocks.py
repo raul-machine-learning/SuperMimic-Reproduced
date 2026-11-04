@@ -24,8 +24,8 @@ import tyro
 from PIL import Image, ImageDraw, ImageFont
 from scipy.spatial import cKDTree
 
-from supermimic.data.glove_taxels import (BLOCK_FIT_FILE, PAD_BLOCKS, SINGLE_BLOCKS, fitted_blocks, palm_frame,
-                                          taxel_layout, world_taxels)
+from supermimic.data.glove_taxels import (BLOCK_FIT_FILE, PAD_BLOCKS, SINGLE_BLOCKS, built_thumb_roll, fitted_blocks,
+                                          palm_frame, taxel_layout, world_taxels)
 from supermimic.data.sweep_mocap import taxel_load
 from supermimic.robots import HAND_DATA, HAND_SHAPE
 
@@ -73,11 +73,14 @@ def add_lines(scene: mujoco.MjvScene, a: np.ndarray, b: np.ndarray, rgba=(0.1, 0
 
 
 def main(out: Path, clip: Path = HAND_DATA / "sweep_task023_hands.npz",
-         grasp_clip: Path = HAND_DATA / "sweep_task023_hands_registered_closed.npz", tile: int = 700) -> None:
-    """``clip``: for the palm-up views; ``grasp_clip``: the grasp-corrected clip for the views on the props."""
+         grasp_clip: Path = HAND_DATA / "sweep_task023_hands_registered_closed.npz", tile: int = 700, grasp: bool = True,
+         title: str = "") -> None:
+    """``clip``: for the palm-up views; ``grasp_clip``: the grasp-corrected clip for the views on the props (``grasp``
+    False: the palm-up row only); ``title``: what changed the hands, for the caption."""
     rch = _rch()
-    fit = json.loads(BLOCK_FIT_FILE.read_text())
-    c, g = dict(np.load(clip)), dict(np.load(grasp_clip))
+    fit = json.loads(BLOCK_FIT_FILE.read_text()) if BLOCK_FIT_FILE.exists() else None
+    c = dict(np.load(clip))
+    g = dict(np.load(grasp_clip)) if grasp else c
     model, props = rch.build_model(g, Path(str(g["mocap_dir"])), ghosts=False)
     data = mujoco.MjData(model)
     neutral = {S: taxel_layout(model, S) for S in SIDES}
@@ -148,6 +151,7 @@ def main(out: Path, clip: Path = HAND_DATA / "sweep_task023_hands.npz",
     def scores(S: str) -> str:
         (m0, o0), (m1, o1) = fit["before"][S]["held_out"], fit["after"][S]["held_out"]
         return f"held-out agreement {o0:.3f} -> {o1:.3f}, share MSE {m0:.3f} -> {m1:.3f}"
+    scores = scores if fit else (lambda S: "no block fit yet")
 
     tiles = []
     for S in SIDES:
@@ -164,7 +168,7 @@ def main(out: Path, clip: Path = HAND_DATA / "sweep_task023_hands.npz",
         rch.label(im, (10, 10), [f"{SIDE_NAME[S]} hand, palm up: fitted sensor blocks",
                                  "grey: neutral layout, colored: fitted (by finger, palm yellow)", scores(S)], font, small)
         tiles.append(im)
-    for S in SIDES:
+    for S in SIDES if grasp else ():
         load, t = grasp_pose(S)
         p1, n1 = world_taxels(data, fitted[S])
         near = cKDTree(prop_points(HELD[S])).query(p1)[0] < 0.005
@@ -186,15 +190,31 @@ def main(out: Path, clip: Path = HAND_DATA / "sweep_task023_hands.npz",
                                  f"black ring: within 5 mm of the {prop}; {share:.0%} of the load there"], font, small)
         tiles.append(im)
 
-    W = Image.new("RGB", (2 * tile, 2 * tile + 34), (245, 245, 245))
+    rows = len(tiles) // 2
+    W = Image.new("RGB", (2 * tile, rows * tile + 34), (245, 245, 245))
     for k, im in enumerate(tiles):
         W.paste(im, ((k % 2) * tile, (k // 2) * tile))
-    mirror = "one mirrored set for both hands" if fit.get("mirror") else "one set per hand"
-    ImageDraw.Draw(W).text((10, 2 * tile + 8), f"{HAND_SHAPE} hands, taxel blocks fitted to the glove pressure at the mocap pose "
-                           f"({mirror}, {fit['frames']} frames, {fit['held_out']} held out).", fill=(20, 20, 20), font=small)
+    roll = built_thumb_roll(model)
+    text = f"{title + ': ' if title else ''}{HAND_SHAPE} hands" + (f", thumb tip box roll {np.degrees(roll):+.1f} deg" if roll is not None else "")
+    if fit:
+        mirror = "one mirrored set for both hands" if fit.get("mirror") else "one set per hand"
+        text += f"; taxel blocks fitted at the mocap pose ({mirror}, {fit['frames']} frames, {fit['held_out']} held out)."
+    ImageDraw.Draw(W).text((10, rows * tile + 8), text, fill=(20, 20, 20), font=small)
     out.parent.mkdir(parents=True, exist_ok=True)
     W.save(out)
     print("wrote", out)
+
+
+def hands_picture(name: str, title: str, **kw) -> None:
+    """The picture every script that changes the hands writes: media/<shape>_<name>.png, also into the directory
+    ``SM_MEDIA_MIRROR`` names when set."""
+    out = ROOT / "media" / f"{HAND_SHAPE}_{name}.png"
+    main(out, title=title, **kw)
+    if os.environ.get("SM_MEDIA_MIRROR"):
+        mirror = Path(os.environ["SM_MEDIA_MIRROR"]) / out.name
+        mirror.parent.mkdir(parents=True, exist_ok=True)
+        mirror.write_bytes(out.read_bytes())
+        print("copied to", mirror)
 
 
 if __name__ == "__main__":

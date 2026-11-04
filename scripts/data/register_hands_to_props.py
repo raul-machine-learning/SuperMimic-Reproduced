@@ -13,9 +13,11 @@ untouched; the recorded wrist positions are kept as ``base_pos_mocap``.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("MUJOCO_GL", "egl")
 import mujoco
 import numpy as np
 import tyro
@@ -119,6 +121,10 @@ def main(clip: Path = HAND_DATA / "sweep_task023_hands.npz", out: Path | None = 
               f"deepest penetration {before[2] * 1000:4.1f} -> {after[2] * 1000:4.1f} mm")
     np.savez_compressed(out, **{**c, "base_pos": base_pos, "base_pos_mocap": c["base_pos"]})
     print(f"wrote {out}")
+    sys.path.insert(0, str(ROOT / "scripts/media"))
+    from render_glove_blocks import hands_picture
+
+    hands_picture("hands_registered", "register_hands_to_props.py: wrists registered to the props", grasp_clip=out)
 
 
 if __name__ == "__main__":

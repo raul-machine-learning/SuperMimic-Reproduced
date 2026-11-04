@@ -17,7 +17,8 @@ its joint to its child's; the palm is one ray of two capsules per finger, from a
 points spread wider than the mocap's metacarpal bases, as the flesh is), a capsule across the heel, and the thenar.
 With ``SM_HAND_SHAPE=box`` every capsule is a box instead: the same span (the radius past each end), a square
 cross-section as wide as the capsule, one face out of the palm (thumb: toward where its own flexion moves it), at
-the model's zero pose.
+the model's zero pose; the distal thumb box instead has a fixed roll angle about its bone, set anatomically at the
+clip's median pose (``thumb_frames``; fitted by scripts/data/fit_glove_blocks.py).
 Fingers are position-driven (effort-limited, like tendons); the free roots are driven by whoever uses the model.
 
 Writes ``src/supermimic/assets/<shape>_hands/<shape>_hands.xml`` and ``<shape>_rig.xml``, and
@@ -28,14 +29,17 @@ in the model's hinge order, the props, the table, the glove pressure and the moc
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
+os.environ.setdefault("MUJOCO_GL", "egl")
 import mujoco
 import numpy as np
 import tyro
 from scipy.spatial.transform import Rotation
 
-from supermimic.data.glove_taxels import flexion_alignment, flexion_check
+from supermimic.data.glove_taxels import fitted_thumb_roll, flexion_alignment, flexion_check, palm_frame
 from supermimic.data.sweep_mocap import estimate_table, load_human, load_pressure, load_props
 from supermimic.robots import CAPSULE_RIG_XML, HAND_DATA, HAND_SHAPE, HANDS_XML
 
@@ -98,9 +102,10 @@ def decompose(r: Rotation, axes: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 def add_segment(body, name: str, a: np.ndarray, b: np.ndarray, radius: float, rgba, palm: np.ndarray, shape: str,
-                shorten_end: float = 0.0) -> None:
+                shorten_end: float = 0.0, side: np.ndarray | None = None) -> None:
     """A capsule from ``a`` to ``b``, or (``shape`` box) the box of the same span (``radius`` past each end) with a
-    2 ``radius`` square cross-section and one face toward ``palm`` (body frame)."""
+    2 ``radius`` square cross-section and one face toward ``palm`` (body frame): the box's x axis; ``side``: its y
+    axis points that way (the box's z then runs either way along the bone)."""
     d = b - a
     L = np.linalg.norm(d)
     b = a + d * max(L - shorten_end, 1e-3) / L
@@ -111,7 +116,10 @@ def add_segment(body, name: str, a: np.ndarray, b: np.ndarray, radius: float, rg
     z = (b - a) / np.linalg.norm(b - a)
     x = palm - (palm @ z) * z
     x /= np.linalg.norm(x)
-    quat = Rotation.from_matrix(np.stack([x, np.cross(z, x), z], 1)).as_quat(scalar_first=True)
+    y = np.cross(z, x)
+    if side is not None and y @ side < 0:
+        z, y = -z, -y
+    quat = Rotation.from_matrix(np.stack([x, y, z], 1)).as_quat(scalar_first=True)
     body.add_geom(name=f"{name}_collision", type=mujoco.mjtGeom.mjGEOM_BOX, pos=0.5 * (a + b), quat=quat,
                   size=[radius, radius, 0.5 * np.linalg.norm(b - a) + radius], **kw)
 
@@ -124,9 +132,12 @@ def segment_palm_side(flex_axis: np.ndarray, a: np.ndarray, b: np.ndarray, palm:
     return s if np.linalg.norm(s) > 0.5 else palm
 
 
-def make_spec(human, flip: set[str], rig: dict[str, tuple[np.ndarray, np.ndarray]] | None = None, shape: str = "capsule"
+def make_spec(human, flip: set[str], rig: dict[str, tuple[np.ndarray, np.ndarray]] | None = None, shape: str = "capsule",
+              thumb_roll: float = 0.0, thumb_frames: dict[str, tuple[np.ndarray, np.ndarray]] | None = None
               ) -> tuple[mujoco.MjSpec, dict[str, np.ndarray], list]:
-    """The two hands; ``flip``: flexion hinges whose mean-flexion sign is reversed; ``shape``: segment geometry.
+    """The two hands; ``flip``: flexion hinges whose mean-flexion sign is reversed; ``shape``: segment geometry;
+    ``thumb_frames`` (boxes, ``thumb_frames()``): side -> the distal thumb box's (face, side) in its body frame, built
+    at roll angle ``thumb_roll`` (rad, stored as the model's ``thumb_roll`` numeric, read by glove_taxels).
 
     Without ``rig`` each hand is a free body. With ``rig`` (side -> wrist origin, wrist orientation) both hang from
     one root body ``rig`` (a free joint welded to the world, so the model keeps a floating root) through six wrist
@@ -136,6 +147,8 @@ def make_spec(human, flip: set[str], rig: dict[str, tuple[np.ndarray, np.ndarray
     spec = mujoco.MjSpec()
     spec.modelname = f"{shape}_rig" if rig else f"{shape}_hands"
     spec.compiler.degree = False
+    if thumb_frames:
+        spec.add_numeric(name="thumb_roll", data=[thumb_roll])
     joint_angles: dict[str, np.ndarray] = {}
     report = []
 
@@ -194,8 +207,8 @@ def make_spec(human, flip: set[str], rig: dict[str, tuple[np.ndarray, np.ndarray
         palm = np.cross(radial, along) if S == "R" else np.cross(along, radial)
         palm /= np.linalg.norm(palm)
 
-        def segment(body, name, a, b, radius, palm_side, shorten_end=0.0):
-            add_segment(body, name, a, b, radius, rgba, palm_side, shape, shorten_end)
+        def segment(body, name, a, b, radius, palm_side, shorten_end=0.0, side=None):
+            add_segment(body, name, a, b, radius, rgba, palm_side, shape, shorten_end, side)
 
         segment(hand, f"{S}_heel", heel["Index"], heel["Pinky"], WRIST_RADIUS, palm)
         segment(hand, f"{S}_thenar", heel["Index"], child_pos(f"{side}HandThumb1"), THENAR_RADIUS, palm)
@@ -226,7 +239,10 @@ def make_spec(human, flip: set[str], rig: dict[str, tuple[np.ndarray, np.ndarray
                 nxt = bones[k + 1] if k + 1 < len(bones) else tip
                 end = child_pos(nxt)
                 face = segment_palm_side(axes[0], zero, end, palm_local) if face_flexion else palm_local
-                segment(b, f"{prefix}{k + 1}", zero, end, radii[k], face, shorten_end=radii[k] if nxt == tip else 0.0)
+                side = None
+                if thumb_frames and f"{prefix}{k + 1}" == f"{S}_thumb3":
+                    face, side = thumb_frames[S]
+                segment(b, f"{prefix}{k + 1}", zero, end, radii[k], face, shorten_end=radii[k] if nxt == tip else 0.0, side=side)
                 if nxt == tip:
                     b.add_site(name=f"{prefix}_tip", pos=end, size=[0.004, 0, 0])
                 body_parent = b
@@ -280,6 +296,27 @@ def flexion_flips(model: mujoco.MjModel, joint_angles: dict[str, np.ndarray], st
     return {n for n in joint_angles if n.endswith("_flex") and flexion_alignment(model, data, n) < 0}
 
 
+def thumb_frames(model: mujoco.MjModel, joint_angles: dict[str, np.ndarray], roll: float) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Side -> (face, side) of the distal thumb box in its body frame. At the clip's median pose, across the bone, the
+    face is turned ``roll`` (rad) from the direction toward the fingers (away from the index side) toward the palm
+    front, and side is 90 deg further. Both are anatomical, so the two thumbs mirror each other; the thumb tip's own
+    hinge axis is not used (the recording moves that joint by a few degrees only)."""
+    data = median_pose(model, joint_angles)
+    out = {}
+    for S in SIDES:
+        _, pn, radial, _ = palm_frame(model, data, S)
+        b = model.body(f"{S}_thumb3").id
+        u = data.site_xpos[model.site(f"{S}_thumb_tip").id] - data.xpos[b]
+        u /= np.linalg.norm(u)
+        e1 = -radial - (-radial @ u) * u
+        e1 /= np.linalg.norm(e1)
+        e2 = pn - (pn @ u) * u - (pn @ e1) * e1
+        e2 /= np.linalg.norm(e2)
+        R = data.xmat[b].reshape(3, 3)
+        out[S] = (R.T @ (np.cos(roll) * e1 + np.sin(roll) * e2), R.T @ (np.cos(roll) * e2 - np.sin(roll) * e1))
+    return out
+
+
 def median_pose(model: mujoco.MjModel, joint_angles: dict[str, np.ndarray]) -> mujoco.MjData:
     data = mujoco.MjData(model)
     for j in range(model.njnt):
@@ -292,8 +329,12 @@ def median_pose(model: mujoco.MjModel, joint_angles: dict[str, np.ndarray]) -> m
 
 
 def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023_hands", out_dir: Path = HAND_DATA,
-         asset: Path = ASSET, rig_asset: Path = RIG_ASSET, shape: str = HAND_SHAPE) -> None:
-    """Defaults follow ``SM_HAND_SHAPE`` (supermimic.robots)."""
+         asset: Path = ASSET, rig_asset: Path = RIG_ASSET, shape: str = HAND_SHAPE, thumb_roll_deg: float | None = None) -> None:
+    """Defaults follow ``SM_HAND_SHAPE`` (supermimic.robots); ``thumb_roll_deg`` (boxes): the distal thumb box's
+    fixed roll angle, default the one fitted by scripts/data/fit_glove_blocks.py."""
+    thumb_roll = np.radians(thumb_roll_deg) if thumb_roll_deg is not None else fitted_thumb_roll()
+    if shape == "box":
+        print(f"thumb roll {np.degrees(thumb_roll):.1f} deg")
     human = load_human(mocap_dir)
     props = load_props(mocap_dir)
     pressure = load_pressure(mocap_dir)
@@ -304,6 +345,9 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
     flips = flexion_flips(spec.compile(), joint_angles)
     spec, joint_angles, report = make_spec(human, flips, shape=shape)
     assert not flexion_flips(spec.compile(), joint_angles), "flexion signs did not settle"
+    frames = thumb_frames(spec.compile(), joint_angles, thumb_roll) if shape == "box" else None
+    if frames:
+        spec, joint_angles, report = make_spec(human, flips, shape=shape, thumb_roll=thumb_roll, thumb_frames=frames)
     model = spec.compile()
     asset.parent.mkdir(parents=True, exist_ok=True)
     asset.write_text(spec.to_xml())
@@ -344,7 +388,7 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
             wrist[f"{S}_wrist_{n}"] = base_pos[:, k, i] - p0[i]
         for i, n in enumerate(("ry", "rx", "rz")):
             wrist[f"{S}_wrist_{n}"] = ang[:, i]
-    rig_spec, _, _ = make_spec(human, flips, rig_pose, shape=shape)
+    rig_spec, _, _ = make_spec(human, flips, rig_pose, shape=shape, thumb_roll=thumb_roll, thumb_frames=frames)
     for n, q in wrist.items():
         j = rig_spec.joint(n)
         if n[-2] == "r":
@@ -399,6 +443,12 @@ def main(mocap_dir: Path = ROOT / "data/sweep_mocap", clip: str = "sweep_task023
         j = model.joint(n)
         a = joint_angles[n]
         print(f"  {n:18s} data {np.degrees(a.min()):+6.1f}..{np.degrees(a.max()):+6.1f} deg   range {np.degrees(j.range[0]):+6.1f}..{np.degrees(j.range[1]):+6.1f}")
+    if asset == ASSET and out.parent == HAND_DATA:
+        sys.path.insert(0, str(ROOT / "scripts/media"))
+        from render_glove_blocks import hands_picture
+
+        roll = f", thumb tip roll {np.degrees(thumb_roll):+.1f} deg" if shape == "box" else ""
+        hands_picture("hands_built", f"build_capsule_hands.py{roll}", clip=out, grasp=False)
 
 
 if __name__ == "__main__":

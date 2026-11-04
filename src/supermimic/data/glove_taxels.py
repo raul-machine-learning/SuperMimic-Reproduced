@@ -40,7 +40,7 @@ import mujoco
 import numpy as np
 import torch
 
-from supermimic.robots import HAND_ASSETS
+from supermimic.robots import HAND_ASSETS, HAND_SHAPE
 
 FIT_FILE = HAND_ASSETS / "glove_taxel_fit.json"
 BLOCK_FIT_FILE = HAND_ASSETS / "glove_block_fit.json"
@@ -145,32 +145,40 @@ class _Pose:
 _POSES: dict[tuple[int, str], _Pose] = {}
 
 
-def _surface(seg: Segment, n: np.ndarray, lat: np.ndarray, axial, arc):
+def _surface(seg: Segment, n: np.ndarray, lat: np.ndarray, axial, arc, turn=None, built: float = 0.0, fixed: bool = False):
     """Points and normals (torch, ..., 3) on a segment: ``axial`` m from the proximal end, ``arc`` m around the bone
     from its palm side ``n`` toward ``lat`` (arc length on the cross-section's perimeter; both torch tensors). On a
-    capsule, past the distal end wraps onto its cap. On a box, the palm side is the face nearest ``n``; past its edge
-    the arc runs on to the side face; ``axial`` stays within the box's span."""
+    capsule, past the distal end wraps onto its cap. On a box, the palm side is the face nearest ``n`` (``fixed``:
+    the box's x face, ``arc`` toward its y axis); past its edge the arc runs on to the side face; ``axial`` stays
+    within the box's span. ``turn`` (torch scalar, rad): the points as on the box built at roll angle ``turn``
+    instead of ``built`` (for fitting that angle)."""
     a, b, r = seg
     u = _unit(b - a)
     n = _unit(n - (n @ u) * u)
     lat = _unit(lat - (lat @ u) * u - (lat @ n) * n)
     L = float(np.linalg.norm(b - a))
     T = lambda v: torch.as_tensor(v, dtype=torch.float64)
+    extra = T(0.0) if turn is None else turn - built
     if seg.axes is None:
-        phi = arc / r
+        phi = arc / r + extra
         over = (axial - L).clamp(min=0.0) / r
         d = torch.cos(phi)[..., None] * T(n) + torch.sin(phi)[..., None] * T(lat) + over[..., None] * T(u)
         d = d / d.norm(dim=-1, keepdim=True)
         return T(a) + axial.clamp(0.0, L)[..., None] * T(u) + r * d, d
     X, Y = seg.axes[:, 0], seg.axes[:, 1]
-    face = max((X, -X, Y, -Y), key=lambda f: f @ n)
-    lat = _unit(lat - (lat @ face) * face - (lat @ u) * u)
+    if fixed:
+        face, side = T(X), T(Y)
+    else:
+        face = max((X, -X, Y, -Y), key=lambda f: f @ n)
+        side = _unit(np.cross(u, face))
+        face, side = T(face), T(side if side @ lat >= 0 else -side)
+    face, side = torch.cos(extra) * face + torch.sin(extra) * side, torch.cos(extra) * side - torch.sin(extra) * face
     t = (arc / r).clamp(-3.0, 3.0)
     on_face = t.abs() <= 1.0
     along_face = torch.where(on_face, torch.ones_like(t), 2.0 - t.abs())
     across = torch.where(on_face, t, torch.sign(t))
-    p = T(a) + axial.clamp(-r, L + r)[..., None] * T(u) + r * (along_face[..., None] * T(face) + across[..., None] * T(lat))
-    nrm = torch.where(on_face[..., None], T(face).expand(p.shape), torch.sign(t)[..., None] * T(lat))
+    p = T(a) + axial.clamp(-r, L + r)[..., None] * T(u) + r * (along_face[..., None] * face + across[..., None] * side)
+    nrm = torch.where(on_face[..., None], face.expand(p.shape), torch.sign(t)[..., None] * side)
     return p, nrm
 
 
@@ -218,16 +226,21 @@ SINGLE_BLOCKS = {"thumb_base": (12, "thumb1", THUMB_BASE_TURN),
 def block_bounds() -> dict[str, tuple[tuple[float, float], ...]]:
     """The parameters of each taxel block, with their bounds. Arrays (fingertip pads, palm): (center shift along the
     segment toward its tip / toward the finger bases (m), center shift toward the thumb / index side (m, around the
-    segment for a pad), scale of the array's spacing); single taxels: the first two."""
+    segment for a pad), scale of the array's spacing); single taxels: the first two. On a box every pad stays on one
+    flat face (``taxel_layout_torch``). Box hands also have ``thumb_roll``: the distal thumb box's fixed roll angle
+    about its bone (rad; 0: its pad face toward the fingers, positive toward the palm front, at the clip's median
+    pose, the same on both hands; scripts/assets/build_capsule_hands.py builds the box at the fitted angle)."""
     shift = (-0.010, 0.010)
     out: dict[str, tuple[tuple[float, float], ...]] = {k: (shift, shift, (0.6, 1.6)) for k in PAD_BLOCKS}
     out.update({k: (shift, shift) for k in SINGLE_BLOCKS})
     out["palm"] = ((-0.020, 0.020), (-0.020, 0.020), (0.6, 1.5))
+    if HAND_SHAPE == "box":
+        out["thumb_roll"] = ((-np.pi, np.pi),)
     return out
 
 
 def neutral_blocks() -> dict[str, tuple[float, ...]]:
-    return {k: (0.0, 0.0, 1.0)[: len(v)] for k, v in block_bounds().items()}
+    return {k: (0.0, 0.0, 1.0, 0.0)[: len(v)] for k, v in block_bounds().items()}
 
 
 def adjust_groups() -> dict[str, tuple[tuple[float, float], tuple[float, float]]]:
@@ -255,6 +268,22 @@ def fitted_blocks(S: str) -> dict[str, tuple[float, ...]]:
     return {k: tuple(v) for k, v in json.loads(BLOCK_FIT_FILE.read_text())["blocks"][S].items()}
 
 
+def built_thumb_roll(model: mujoco.MjModel) -> float | None:
+    """The fixed roll angle (rad) the model's distal thumb box was built with (``thumb_roll`` block), or None for
+    models without one (capsules, boxes facing their flexion side)."""
+    try:
+        return float(model.numeric("thumb_roll").data[0])
+    except KeyError:
+        return None
+
+
+def fitted_thumb_roll() -> float:
+    """The distal thumb box's roll angle fitted by scripts/data/fit_glove_blocks.py (rad; 0 before a fit)."""
+    if not BLOCK_FIT_FILE.exists():
+        return 0.0
+    return float(json.loads(BLOCK_FIT_FILE.read_text())["blocks"]["R"].get("thumb_roll", [0.0])[0])
+
+
 def glove_layout(model: mujoco.MjModel, S: str) -> TaxelLayout:
     """The layout of the glove reward and the renders: ``fitted_blocks`` when fitted, else ``fitted_adjust``."""
     if BLOCK_FIT_FILE.exists():
@@ -277,6 +306,10 @@ def taxel_layout_torch(model: mujoco.MjModel, S: str, blocks: dict[str, torch.Te
     their position in the palm plane is. ``roll``: the pads' and single taxels' second value is a roll about the
     segment (rad, ``adjust_groups``) instead of an arc (m), and pads take no scale."""
     pose = _pose(model, S)
+    built = built_thumb_roll(model)
+    v = (blocks or {}).get("thumb_roll")
+    thumb = {} if built is None else dict(built=built, fixed=True,
+                                          turn=None if v is None else (v if isinstance(v, torch.Tensor) else torch.as_tensor(v, dtype=torch.float64))[0])
     T = lambda v: torch.as_tensor(v, dtype=torch.float64)
     blocks = blocks or {}
     body = np.zeros(129, int)
@@ -286,7 +319,7 @@ def taxel_layout_torch(model: mujoco.MjModel, S: str, blocks: dict[str, torch.Te
     def get(name: str, n: int):
         v = blocks.get(name, neutral_blocks()[name])
         v = v if isinstance(v, torch.Tensor) else T(v)
-        return v if len(v) >= n else torch.cat([v, T([1.0])])
+        return v if len(v) >= n else torch.cat([v, T((0.0, 0.0, 1.0, 0.0)[len(v) : n])])
 
     def put(ids, short: str, p, nrm) -> None:
         for k, i in enumerate(ids):
@@ -299,10 +332,14 @@ def taxel_layout_torch(model: mujoco.MjModel, S: str, blocks: dict[str, torch.Te
         axial0 = T(np.linspace(L + 0.45 * seg.r, 0.0, rows))
         arc0 = T(seg.r * np.linspace(PAD_SPREAD, -PAD_SPREAD, cols))
         dl = dl * seg.r if roll else dl
+        if seg.axes is not None:
+            # The whole array stays on one flat face of the box.
+            room = (seg.r * (1.0 - k * PAD_SPREAD)).clamp(min=0.0)
+            dl = torch.maximum(torch.minimum(dl, room), -room)
         axial = axial0.mean() + da + k * (axial0 - axial0.mean())
         arc = dl + k * arc0
         p, nrm = _surface(seg, pose.segment_palm_side(short), pose.radial, axial[:, None].expand(rows, cols).reshape(-1),
-                          arc[None, :].expand(rows, cols).reshape(-1))
+                          arc[None, :].expand(rows, cols).reshape(-1), **(thumb if short == "thumb3" else {}))
         put(range(first, first + rows * cols), short, p, nrm)
     for name, (i, short, phi) in SINGLE_BLOCKS.items():
         seg = pose.capsule(short)

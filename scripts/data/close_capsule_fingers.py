@@ -14,9 +14,11 @@ closure per finger as ``closure`` (T, 2, 5) rad.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("MUJOCO_GL", "egl")
 import mujoco
 import numpy as np
 import tyro
@@ -119,6 +121,10 @@ def main(clip: Path = HAND_DATA / "sweep_task023_hands.npz", out: Path | None = 
             joint_pos[:, cols] = np.clip(joint_pos[:, cols] + closure[:, k, fi, None] * ratio, lo[cols], hi[cols])
     np.savez_compressed(out, **{**c, "joint_pos": joint_pos, "joint_pos_mocap": c["joint_pos"], "closure": closure, "closure_fingers": np.array(FINGERS)})
     print(f"wrote {out}")
+    sys.path.insert(0, str(ROOT / "scripts/media"))
+    from render_glove_blocks import hands_picture
+
+    hands_picture("hands_closed", "close_capsule_fingers.py: fingers closed onto the props", grasp_clip=out)
     for k, S in enumerate(SIDES):
         prop = HELD_CANDIDATES[held[S]].removeprefix("cleaningtools_")
         print(f"  {SIDE_NAME[S]} hand on the {prop}:")

@@ -18,7 +18,7 @@ summed over the 130 bins, mean over frames, plus a small pull toward the neutral
 holds is held out. Reports the loss and the overlap score (``pressure_agreement``) on the fit and held-out frames,
 writes ``glove_taxels.BLOCK_FIT_FILE`` (read by the glove reward), checks the reward's ``GloveModel`` against it
 and writes a picture of the fitted sensor positions on the hands (scripts/media/render_glove_blocks.py) to ``image``
-(default media/glove_block_fit_<shape>.png).
+(default media/<shape>_glove_block_fit.png).
 """
 
 from __future__ import annotations
@@ -78,11 +78,11 @@ def shares(x: torch.Tensor, floor: float) -> torch.Tensor:
     return torch.cat([p, 1.0 - p.sum(-1, keepdim=True)], -1)
 
 
-def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool = True, device: str = "cuda:0", write: bool = True,
+def main(steps: int = 400, lr: float = 0.01, prior: float = 2e-3, mirror: bool = True, device: str = "cuda:0", write: bool = True,
          image: Path | None = None) -> None:
     from diag_pressure_blocks import BLOCKS
 
-    from supermimic.data.glove_taxels import BLOCK_FIT_FILE, block_bounds, neutral_blocks, taxel_layout_torch
+    from supermimic.data.glove_taxels import BLOCK_FIT_FILE, block_bounds, built_thumb_roll, neutral_blocks, taxel_layout_torch
     from supermimic.kinematics.glove import GLOVE_PRESSURE_FLOOR, NEAR, OFF_TAXEL_SHARE, SIM_PRESSURE_FLOOR, SOFT, GloveModel
     from supermimic.kinematics.rotations import quat_apply, quat_apply_inverse
     from supermimic.robots import HAND_SHAPE, HANDS_XML, ROBOT
@@ -95,6 +95,9 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool =
     keys = list(bounds)
     lo = torch.tensor([b[0] for k in keys for b in bounds[k]], dtype=torch.float64)
     hi = torch.tensor([b[1] for k in keys for b in bounds[k]], dtype=torch.float64)
+    if "thumb_roll" in neutral:
+        neutral["thumb_roll"] = (built_thumb_roll(model) or 0.0,)
+    assert keys[-1] == "thumb_roll" or "thumb_roll" not in keys
     mid = torch.tensor([v for k in keys for v in neutral[k]], dtype=torch.float64)
     z0 = torch.atanh(2.0 * (mid - lo) / (hi - lo) - 1.0)
     sizes = [len(bounds[k]) for k in keys]
@@ -133,23 +136,28 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool =
         return ((P - Q) ** 2).sum(-1).mean().item(), torch.minimum(P, Q).sum(-1).mean().item()
 
     sides = [s for s, _ in ROBOT.grip]
-    shared = torch.zeros(len(lo), dtype=torch.float64, requires_grad=True)
-    z = {S: shared if mirror else torch.zeros(len(lo), dtype=torch.float64, requires_grad=True) for S in sides}
-    before = {S: {"fit": score(h, S, values(z[S].detach()), ~val), "held_out": score(h, S, values(z[S].detach()), val)} for h, S in enumerate(sides)}
-    opt = torch.optim.Adam([shared] if mirror else list(z.values()), lr=lr)
+    zero = values(torch.zeros(len(lo), dtype=torch.float64))
+    before = {S: {"fit": score(h, S, zero, ~val), "held_out": score(h, S, zero, val)} for h, S in enumerate(sides)}
     fit_rows = {h: torch.as_tensor(np.nonzero(~val & hold[:, h].cpu().numpy())[0], device=device) for h in range(len(sides))}
-    for it in range(steps):
-        opt.zero_grad()
-        total = 0.0
-        for h, S in enumerate(sides):
-            v = values(z[S])
-            P, Q = forward(h, S, v, fit_rows[h])
-            loss = ((P - Q) ** 2).sum(-1).mean() + prior * (((v - mid) / (hi - lo)) ** 2).sum().to(P.device)
-            loss.backward()
-            total += loss.item()
-        opt.step()
-        if it % 50 == 0 or it == steps - 1:
-            print(f"step {it:4d}: loss {total:.4f}")
+
+    def optimize() -> tuple[dict[str, torch.Tensor], float]:
+        shared = torch.zeros(len(lo), dtype=torch.float64, requires_grad=True)
+        z = {S: shared if mirror else torch.zeros(len(lo), dtype=torch.float64, requires_grad=True) for S in sides}
+        opt = torch.optim.Adam([shared] if mirror else list(z.values()), lr=lr)
+        for it in range(steps):
+            opt.zero_grad()
+            total = 0.0
+            for h, S in enumerate(sides):
+                v = values(z[S])
+                P, Q = forward(h, S, v, fit_rows[h])
+                loss = ((P - Q) ** 2).sum(-1).mean() + prior * (((v - mid) / (hi - lo)) ** 2).sum().to(P.device)
+                loss.backward()
+                total += loss.item()
+            opt.step()
+        return z, total
+
+    z, total = optimize()
+    print(f"final loss {total:.4f}")
 
     fitted = {S: {k: [round(float(x), 6) for x in t] for k, t in unpack(values(z[S].detach())).items()} for S in sides}
     after = {S: {"fit": score(h, S, values(z[S].detach()), ~val), "held_out": score(h, S, values(z[S].detach()), val)} for h, S in enumerate(sides)}
@@ -162,6 +170,10 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool =
 
     print("\nblock parameters: center shifts (mm) along the segment / toward the finger bases, toward the thumb / index side; scale")
     for k in keys:
+        if k == "thumb_roll":
+            print(f"  {k:16s} both {np.degrees(fitted[sides[0]][k][0]):+6.1f} deg from facing the fingers toward the palm front "
+                  f"(hands built at {np.degrees(mid[-1].item()):+.1f}: rebuild them if it moved)")
+            continue
         cells = []
         for S in sides[:1] if mirror else sides:
             t = fitted[S][k]
@@ -172,7 +184,7 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool =
     for h, S in enumerate(sides):
         rows = torch.as_tensor(np.nonzero(hold[:, h].cpu().numpy())[0], device=device)
         with torch.no_grad():
-            P0, Q = forward(h, S, values(z[S].detach() * 0), rows)
+            P0, Q = forward(h, S, zero, rows)
             P1, _ = forward(h, S, values(z[S].detach()), rows)
         print(f"  {S} hand: {'block':12s} {'glove':>6s} {'before':>7s} {'after':>6s} {'overlap before':>15s} {'after':>6s}")
         for name, ix in BLOCKS.items():
@@ -193,7 +205,10 @@ def main(steps: int = 300, lr: float = 0.05, prior: float = 2e-3, mirror: bool =
         spec = importlib.util.spec_from_file_location("render_glove_blocks", ROOT / "scripts/media/render_glove_blocks.py")
         render = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(render)
-        render.main(image or ROOT / "media" / f"glove_block_fit_{HAND_SHAPE}.png")
+        if image:
+            render.main(image)
+        else:
+            render.hands_picture("glove_block_fit", "fit_glove_blocks.py: taxel blocks fitted")
 
 
 if __name__ == "__main__":
