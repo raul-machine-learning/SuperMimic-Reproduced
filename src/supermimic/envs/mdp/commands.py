@@ -284,6 +284,10 @@ class MultiClipMotionCommand(CommandTerm):
     # ------------------------------------------------------------------ sampling
 
     def _sample_frames(self, n: int) -> torch.Tensor:
+        f = self._sample_frames_any(n)
+        return f if self.library.free_start is None else self.library.free_start[f]
+
+    def _sample_frames_any(self, n: int) -> torch.Tensor:
         lib = self.library
         cfg = self.cfg
         if cfg.sampling_mode == "start":

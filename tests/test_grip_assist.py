@@ -11,21 +11,21 @@ from supermimic.robots import ROBOT
 pytestmark = pytest.mark.skipif(not ROBOT.grip, reason="robot has no grip")
 
 
-def test_schedule_and_mask():
-    a0 = ROBOT.grip_assist
-    assert grip_assist.scheduled_level(0, 100, 200) == a0
-    assert grip_assist.scheduled_level(200, 100, 200) == pytest.approx(0.5 * a0)
+def test_schedule_and_offsets():
+    assert grip_assist.scheduled_level(0, 100, 200) == 1.0
+    assert grip_assist.scheduled_level(200, 100, 200) == pytest.approx(0.5)
     assert grip_assist.scheduled_level(10_000, 100, 200) == 0.0
-    m = grip_assist.flex_mask(ROBOT.actuated_joint_names, "cpu")
+    names = ROBOT.actuated_joint_names
+    full = grip_assist.offsets(names, "cpu")
     for g, (side, _) in enumerate(ROBOT.grip):
-        names = [j for j, on in zip(ROBOT.actuated_joint_names, m[g].tolist()) if on]
-        assert names and all(j.startswith(f"{side}_") and j.endswith("_flex") and "wrist" not in j for j in names)
+        moved = [j for j, v in zip(names, full[g].tolist()) if v != 0.0]
+        assert len(moved) == 21 and all(j.startswith(f"{side}_") and "wrist" not in j for j in moved), moved
     grip_assist.set_level(0.0)
-    assert grip_assist.assist_offset(torch.ones(3, len(ROBOT.grip)), m) is None
+    assert grip_assist.assist_offset(torch.ones(3, len(ROBOT.grip)), full) is None
     grip_assist.set_level(0.5)
     try:
-        off = grip_assist.assist_offset(torch.tensor([[1.0] + [0.0] * (len(ROBOT.grip) - 1)]), m)
-        assert torch.equal(off[0], 0.5 * m[0].float())
+        off = grip_assist.assist_offset(torch.tensor([[1.0] + [0.0] * (len(ROBOT.grip) - 1)]), full)
+        assert torch.equal(off[0], 0.5 * full[0])
     finally:
         grip_assist.set_level(0.0)
 
@@ -46,3 +46,10 @@ def test_library_holding_flags():
     assert torch.equal(early[:n], one.grip_hold_early) and torch.equal(early[n:], one.grip_hold_early)
     G = len(ROBOT.grip)
     assert torch.equal(lib.goal_feat[:, GOAL_FEAT_DIM - G :], hold.float())
+    # Start frames: held frames map back to the last free frame of their clip, free frames to themselves.
+    fs = lib.free_start
+    busy = early.any(-1)
+    assert torch.equal(fs[~busy], torch.arange(lib.num_frames)[~busy])
+    assert not busy[fs].any() and (lib.frame_clip[fs] == lib.frame_clip).all()
+    first = int(busy[:n].float().argmax())
+    assert (fs[first : first + 50] == first - 1).all()

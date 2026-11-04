@@ -17,6 +17,7 @@ import torch
 import tyro
 
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
+from supermimic.envs.mdp import grip_assist
 from supermimic.envs.mdp.motion_library import discover_npz
 from supermimic.envs.mdp.rewards import TrackingRewardCfg, glove_agreement_sim
 from supermimic.envs.state_io import NQ, StateIO
@@ -25,7 +26,10 @@ from supermimic.robots import ROBOT
 
 
 @torch.no_grad()
-def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed"), out: Path = Path("media/rollouts.npz"), device: str = "cuda:0") -> None:
+def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed"), out: Path = Path("media/rollouts.npz"), device: str = "cuda:0",
+         grip_assist_level: float = 0.0) -> None:
+    """``grip_assist_level``: fraction of the grasp offsets added while the glove holds (supermimic.envs.mdp.grip_assist); 0 = the policy alone."""
+    grip_assist.set_level(grip_assist_level)
     files = [str(f) for f in discover_npz(npz_dir, names=clips)]
     missing = set(clips) - {Path(f).stem for f in files}
     assert not missing, f"clips not found in {npz_dir}: {sorted(missing)}"

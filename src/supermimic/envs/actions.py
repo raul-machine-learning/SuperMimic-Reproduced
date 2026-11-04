@@ -51,9 +51,9 @@ class NoisyJointPositionAction(JointPositionAction):
         nxt = torch.minimum(cmd.frame + 1, lib.last_frame_of(cmd.frame))
         target = lib.ref(nxt).joint_pos[:, self._target_ids]
         if lib.grip_hold_early is not None:
-            if not hasattr(self, "_grip_mask"):
-                self._grip_mask = grip_assist.flex_mask(self.target_names, target.device)
-            extra = grip_assist.assist_offset(lib.grip_hold_early[nxt], self._grip_mask)
+            if not hasattr(self, "_grip_offsets"):
+                self._grip_offsets = grip_assist.offsets(self.target_names, target.device)
+            extra = grip_assist.assist_offset(lib.grip_hold_early[nxt], self._grip_offsets)
             if extra is not None:
                 target = target + extra
         return target

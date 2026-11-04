@@ -94,7 +94,7 @@ def imagine(
         inv_scale = 1.0 / torch.tensor(ROBOT.action_scale_vector(), device=device)
         target = ref_all.joint_pos[:, act]
         if lib.grip_hold_early is not None:
-            extra = grip_assist.assist_offset(lib.grip_hold_early[frames_all.reshape(-1)], grip_assist.flex_mask(ROBOT.actuated_joint_names, device))
+            extra = grip_assist.assist_offset(lib.grip_hold_early[frames_all.reshape(-1)], grip_assist.offsets(ROBOT.actuated_joint_names, device))
             if extra is not None:
                 target = target + extra
         a_offset_all = ((target - q0[act]) * inv_scale).reshape(horizon + 1, n, -1)

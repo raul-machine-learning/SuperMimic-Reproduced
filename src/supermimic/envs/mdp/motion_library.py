@@ -213,7 +213,10 @@ class MotionLibrary:
 
         # (N, G) the glove of each hand of ROBOT.grip holds, and the same switched on ROBOT.grip_anticipate frames
         # early inside each clip (supermimic.envs.mdp.grip_assist).
-        self.grip_hold = self.grip_hold_early = None
+        # free_start: (N,) the frame itself when no glove holds there, else the last frame before that grasp began
+        # (the clip start if it holds from frame 0): episodes start with free hands, since a prop placed in a hand
+        # that does not squeeze yet just falls.
+        self.grip_hold = self.grip_hold_early = self.free_start = None
         if ROBOT.grip:
             self.grip_hold = self.taxel_pressed.amax(-1) > 0.5
             early = self.grip_hold.clone()
@@ -221,6 +224,13 @@ class MotionLibrary:
                 same = self.frame_clip[d:] == self.frame_clip[:-d]
                 early[:-d] |= self.grip_hold[d:] & same[:, None]
             self.grip_hold_early = early
+            busy = early.any(-1).cpu().numpy()
+            free = np.arange(self.num_frames)
+            starts = set(self.clip_start.tolist())
+            for f in range(self.num_frames):
+                if busy[f] and f not in starts:
+                    free[f] = free[f - 1]
+            self.free_start = torch.as_tensor(free, device=self.device)
         if not compact:
             self.goal_feat = self._goal_features(torch.arange(self.num_frames, device=self.device))
 

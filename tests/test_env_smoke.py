@@ -147,7 +147,7 @@ def test_grip_assist_moves_the_set_point(env):
     finally:
         grip_assist.set_level(0.0)
     nxt = torch.minimum(cmd.frame + 1, lib.last_frame_of(cmd.frame))
-    want = 0.4 * (lib.grip_hold_early[nxt].float() @ grip_assist.flex_mask(term.target_names, env.device).float())
+    want = 0.4 * (lib.grip_hold_early[nxt].float() @ grip_assist.offsets(term.target_names, env.device))
     assert lib.grip_hold_early[nxt].any()
     torch.testing.assert_close(assisted - base, want)
 

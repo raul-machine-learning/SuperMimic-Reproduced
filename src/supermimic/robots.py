@@ -164,9 +164,9 @@ class RobotSpec:
     # Joint set-points are the next reference frame's joint positions plus the scaled action (instead of the
     # default pose plus the scaled action; supermimic.envs.actions).
     residual_actions: bool = False
-    # Initial extra closing (rad) of a gripping hand's flex set-points while its glove holds, switched on
+    # Grasp offsets (joint regex -> rad) added to a gripping hand's set-points while its glove holds, switched on
     # grip_anticipate frames early; annealed to 0 during training (supermimic.envs.mdp.grip_assist).
-    grip_assist: float = 0.0
+    grip_assist: tuple[tuple[str, float], ...] = ()
     grip_anticipate: int = 10
 
     @property
@@ -538,10 +538,26 @@ ROBOTS: dict[str, RobotSpec] = {
         residual_actions=True,
     ),
 }
+
+
+def _grasp_offsets(S: str, flex1: float, flex2: float, flex3: float, spread: float, thumb1_flex: float, thumb1_spread: float,
+                   thumb2_flex: float, thumb2_spread: float, thumb3_flex: float) -> tuple[tuple[str, float], ...]:
+    fingers = "(index|middle|ring|pinky)"
+    return (
+        (rf"{S}_{fingers}1_flex", flex1), (rf"{S}_{fingers}2_flex", flex2), (rf"{S}_{fingers}3_flex", flex3), (rf"{S}_{fingers}1_spread", spread),
+        (rf"{S}_thumb1_flex", thumb1_flex), (rf"{S}_thumb1_spread", thumb1_spread), (rf"{S}_thumb2_flex", thumb2_flex),
+        (rf"{S}_thumb2_spread", thumb2_spread), (rf"{S}_thumb3_flex", thumb3_flex),
+    )
+
+
 ROBOTS["capsule_hands_props"] = replace(
     ROBOTS["capsule_hands"], name="capsule_hands_props", props=("broom", "dustpan"), grip=(("L", "broom"), ("R", "dustpan")),
     nconmax=96, njmax=600,  # the clip's reference poses need at most 27 contacts and 168 constraint rows
-    grip_assist=0.6,  # the reference replayed with 0.6 rad extra closing keeps both props through the whole clip
+    # From scripts/diag_grasp_search.py: replayed on the reference without perturbations, these carry the broom (2.3 cm
+    # mean error, 7 cm lift) and the dustpan (about 1.5 cm, 23 cm lift); the dustpan grasp was refined under the
+    # training perturbations (--robust). The broom grip needs the thumb opposed and the fingers adducted.
+    grip_assist=_grasp_offsets("L", 0.83, 0.47, 0.46, -0.51, 0.28, 0.44, 0.38, 0.05, 0.64)
+    + _grasp_offsets("R", 0.69, 0.15, 0.67, -0.28, 0.30, -0.37, 0.72, 0.41, 0.67),
 )
 
 

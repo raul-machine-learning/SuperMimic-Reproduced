@@ -258,7 +258,7 @@ class Trainer:
                         f"wm nse1 {agg.get('wm/nse_1step', float('nan'))/max(agg_n,1):.4f} nse8 {(float(err[-1]) if err is not None else float('nan')):.4f} | "
                         f"imag_ret {agg.get('policy/imag_return_undisc', float('nan'))/max(agg_n,1):.3f} surv {agg.get('policy/imag_survival_H', float('nan'))/max(agg_n,1):.3f} | "
                         f"t sim/wm/pi {timers['sim']:.1f}/{timers['wm']:.1f}/{timers['policy']:.1f}s"
-                        + (f" | grip assist {grip_assist.level():.2f} rad" if ROBOT.grip else "")
+                        + (f" | grip assist {grip_assist.level():.0%}" if ROBOT.grip else "")
                     )
                     print(msg, flush=True)
                 agg, agg_n = {}, 0

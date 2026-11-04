@@ -46,7 +46,7 @@ class ScheduleCfg:
     log_interval: int = 50  # iterations
     checkpoint_interval: int = 4000  # iterations
     max_hours: float | None = None
-    # Grip assist (supermimic.envs.mdp.grip_assist): ROBOT.grip_assist up to this iteration, then linear to 0.
+    # Grip assist (supermimic.envs.mdp.grip_assist): full up to this iteration, then linear to 0.
     grip_assist_hold_iterations: int = 2000
     grip_assist_decay_iterations: int = 5000
 
