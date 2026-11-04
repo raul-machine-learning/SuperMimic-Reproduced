@@ -21,12 +21,12 @@ from supermimic.robots import ROBOT
 @torch.no_grad()
 def main(ckpt: Path, clip: str = "sweep_task023", npz_dir: Path = Path("data/npz/capsule_hands"), num_envs: int = 128,
          action_noise_std: float = 0.0, reset_noise: bool = True, domain_randomization: bool = True, obs_noise: bool = True,
-         device: str = "cuda:0") -> None:
+         device: str = "cuda:0", seed: int = 1) -> None:
     files = [str(f) for f in discover_npz(npz_dir, names=[clip])]
     policy, cfg = load_policy_from_checkpoint(ckpt, device)
     env = make_env(SuperMimicEnvCfgArgs(npz_files=files, num_envs=num_envs, future_frames=cfg["env"]["future_frames"], episode_length_s=1.0e5,
                                         action_noise_std=action_noise_std, obs_noise=obs_noise, reset_noise=reset_noise,
-                                        domain_randomization=domain_randomization, sampling_mode="start", record_transitions=False, seed=1), device)
+                                        domain_randomization=domain_randomization, sampling_mode="start", record_transitions=False, seed=seed), device)
     try:
         cmd = env.command_manager.get_term("motion")
         lib = cmd.library
